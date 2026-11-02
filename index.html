@@ -239,6 +239,41 @@ body.playing main{padding-block:12px 12px}
 .stage{border-radius:10px;overflow:hidden;border:1px solid var(--line)}
 .stage canvas{display:block;width:100%;touch-action:manipulation}
 .rotate{font-size:13px;color:var(--muted);margin:8px 0 0;text-align:center}
+
+/* Bibliothèque lisible */
+.mine-head{align-items:flex-end}
+.lib-h{font-family:var(--f-display);font-weight:400;font-size:clamp(28px,7vw,36px);line-height:1.1;margin:0}
+.lib-sub{margin:4px 0 0;color:var(--muted);font-size:14px}
+.lib-tools{display:flex;flex-direction:column;gap:8px;margin:8px 0 4px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 57px);z-index:5;background:var(--bg);padding-block:8px}
+.search{font-size:16px}
+.cat-filter button.todo{color:var(--bad);border-color:var(--bad)}
+.chapter .cat-h{display:flex;align-items:baseline;gap:10px;font-family:var(--f-display);font-weight:400;font-size:26px;letter-spacing:0;text-transform:none;color:var(--ink);margin:26px 0 10px}
+.chapter .cat-h.todo{color:var(--bad)}
+.cat-h small{font-family:var(--f-body);font-size:13px;color:var(--muted)}
+.song-card{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 12px 6px;margin-bottom:10px}
+.song-card h3{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;margin:0 0 6px;font-size:17px;overflow-wrap:anywhere}
+.vcount{font-size:12px;font-weight:700;color:var(--felt);background:var(--felt-soft);border-radius:999px;padding:2px 8px}
+.ver-row{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:4px 0}
+.ver-link{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;padding:8px 0}
+.ver-txt{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.ver-txt b{font-size:15px;overflow-wrap:anywhere}
+.ver-txt span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.go{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--felt);color:#fff;font-size:12px}
+.dpill{flex:none;font-size:12px;font-weight:700;border-radius:999px;padding:3px 9px;min-width:86px;text-align:center;background:var(--line);color:var(--muted)}
+.dpill.d1{background:var(--ok-soft);color:var(--ok)} .dpill.d2{background:var(--felt-soft);color:var(--felt)} .dpill.d3{background:var(--bad-soft);color:var(--bad)}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-top:14px}
+.legend .dpill{min-width:0}
+.empty-card{border:1px dashed var(--line);border-radius:12px;padding:14px 16px;margin-top:10px}
+.empty-card ol{margin:6px 0 0;padding-left:20px}
+.builtin{margin-top:28px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:4px 14px}
+.builtin>summary{cursor:pointer;list-style:none;padding:12px 0;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.builtin>summary::-webkit-details-marker{display:none}
+.builtin>summary::after{content:"Afficher";font-size:13px;color:var(--felt);font-weight:700}
+.builtin[open]>summary::after{content:"Masquer"}
+.builtin>summary span{display:flex;flex-direction:column}
+.builtin>summary small{color:var(--muted);font-size:13px}
+.builtin .song-row:first-of-type{border-top:1px solid var(--line)}
+@media (max-width:420px){.dpill{min-width:0}}
 @media (orientation:landscape) and (max-height:560px){
   body.playing header{display:none}
   body.playing main{padding-block:6px 0}
@@ -872,8 +907,6 @@ const b64e=buf=>{ let s=""; const u=new Uint8Array(buf); for(let i=0;i<u.length;
 const b64d=str=>{ const s=atob(str); const u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u.buffer; };
 function getImports(){ return store.get("imports",[]); }
 function saveImports(list){ try{ localStorage.setItem("atelier-piano:imports",JSON.stringify(list)); markDirty(); return true; }catch(e){ return false; } }
-function loadImport(id){ const it=getImports().find(x=>x.id===id); if(!it) return null;
-  const s=parseMidi(b64d(it.b64)); s.id=id; s.title=it.name; s.sub=(it.cat||guessCat(it.name,it.meta))+" · fichier importé"; assignHands(s,store.get("hands-"+id,"pistes")); return s; }
 
 /* ---------- Catégories ---------- */
 const UNSORTED="À classer";
@@ -894,40 +927,76 @@ function guessCat(name,meta){ const t=normTxt(name+" "+(meta||""));
   return UNSORTED; }
 const cleanName=f=>f.replace(/\.(mid|midi)$/i,"").replace(/[_]+/g," ").replace(/\s+-\s+/g," – ").replace(/\s{2,}/g," ").trim();
 
+/* ---------- Titres, versions et difficulté ---------- */
+const NOISE=["piano","solo","easy","facile","beginner","debutant","débutant","intermediate","intermediaire","intermédiaire","advanced","avance","avancé","hard","difficile","expert","simple","simplified","simplifie","simplifié","version","ver","arr","arranged","arrangement","sheet","music","midi","cover","ost","full","short","tutorial","synthesia","copy","copie","final"];
+const VERSION_WORDS=["easy","facile","beginner","debutant","débutant","intermediate","intermediaire","intermédiaire","advanced","avance","avancé","hard","difficile","expert","simple","simplified","simplifie","simplifié","full","short"];
+const CAT_STRIP={"Naruto":["naruto","shippuden","shippuuden","boruto"],"Bleach":["bleach"],"Fairy Tail":["fairy tail","fairytail"],"Chris Brown":["chris brown","chrisbrown","breezy"],"Classique":[]};
+function catWords(cat){ return (CAT_STRIP[cat]||(cat===UNSORTED?[]:[cat])).map(x=>normTxt(x).trim()); }
+function splitTitle(name,cat){
+  // Retire du nom de fichier le nom de la catégorie et les mots qui décrivent la version
+  const cw=catWords(cat).filter(x=>!x.includes(" "));
+  const cwMulti=catWords(cat).filter(x=>x.includes(" "));
+  let t=" "+name.replace(/\s*\(\d+\)\s*$/,"").replace(/[()\[\]{}]/g," ")+" ";
+  cwMulti.forEach(m=>{ t=t.replace(new RegExp("\\s"+m.replace(/ /g,"\\s+")+"(?=\\s)","ig")," "); });
+  const verBits=[]; const keep=[];
+  t.split(/\s+/).filter(Boolean).forEach(w=>{ const n=normTxt(w).trim();
+    if(!n){ keep.push(w); return; }
+    if(/^v\d+$/.test(n)){ verBits.push(w); return; }
+    if(VERSION_WORDS.includes(n)){ verBits.push(w); return; }
+    if(NOISE.includes(n)||cw.includes(n)||n==="by") return;
+    keep.push(w); });
+  let title=keep.join(" ").replace(/^[\s–\-:|,.]+|[\s–\-:|,.]+$/g,"").replace(/\s[–\-]\s[–\-]\s/g," – ").replace(/\s{2,}/g," ").trim();
+  if(title.length<2) title=name;
+  const FRV={easy:"Facile",facile:"Facile",beginner:"Débutant",debutant:"Débutant",intermediate:"Intermédiaire",intermediaire:"Intermédiaire",advanced:"Avancé",avance:"Avancé",hard:"Difficile",difficile:"Difficile",expert:"Expert",simple:"Simple",simplified:"Simplifiée",simplifie:"Simplifiée",full:"Complète",short:"Courte"};
+  const vb=verBits.map(w=>FRV[normTxt(w).trim()]||w);
+  const hint=verBits.map(w=>normTxt(w).trim()).reduce((h,n)=>["easy","facile","beginner","debutant","simple","simplified","simplifie"].includes(n)?"1":["intermediate","intermediaire"].includes(n)?"2":["advanced","avance","hard","difficile","expert"].includes(n)?"3":h,"auto");
+  return {title,ver:vb.join(" "),hint};
+}
+const songKey=t=>normTxt(t).replace(/ /g,"");
+function midiStats(s){
+  const notes=s.notes; let groups=0, last=-9; notes.forEach(n=>{ if(n.s-last>=.04){ groups++; last=n.s; } });
+  const dur=Math.max(1,s.duration); const nps=notes.length/dur; const poly=notes.length/Math.max(1,groups);
+  let lo=127,hi=0; notes.forEach(n=>{ if(n.m<lo)lo=n.m; if(n.m>hi)hi=n.m; });
+  const score=nps*(poly>2.2?1.25:1)+(hi-lo>40?.8:0);
+  return {n:notes.length,dur:Math.round(dur),nps:+nps.toFixed(1),poly:+poly.toFixed(1),lvl:score<3?1:score<6?2:3};
+}
+const DIFF=["","Facile","Intermédiaire","Difficile"];
+function itemLevel(it){ return it.diff&&it.diff!=="auto"?+it.diff:(it.stats?it.stats.lvl:0); }
+function fmtDur(s){ const m=Math.floor(s/60); return m?m+" min "+String(s%60).padStart(2,"0"):s+" s"; }
+function enrich(list){ let changed=false;
+  list.forEach(it=>{ if(!it.cat){ it.cat=guessCat(it.name,it.meta); }
+    if(!it.title){ const sp=splitTitle(it.name,it.cat); it.title=sp.title; if(it.ver===undefined) it.ver=sp.ver; if(!it.diff) it.diff=sp.hint; changed=true; }
+    if(!it.stats){ try{ it.stats=midiStats(parseMidi(b64d(it.b64))); changed=true; }catch(e){ it.stats={n:0,dur:0,nps:0,poly:0,lvl:0}; } } });
+  if(changed){ try{ localStorage.setItem("atelier-piano:imports",JSON.stringify(list)); }catch(e){} }
+  return list; }
+function loadImport(id){ const it=getImports().find(x=>x.id===id); if(!it) return null;
+  const s=parseMidi(b64d(it.b64)); s.id=id; s.title=it.title||it.name; const lv=itemLevel(it);
+  s.sub=(it.cat||guessCat(it.name,it.meta))+(it.ver?" · "+it.ver:"")+(lv&&normTxt(it.ver||"")!==normTxt(DIFF[lv])?" · "+DIFF[lv]:""); assignHands(s,store.get("hands-"+id,"pistes")); return s; }
+
 /* ---------- Bibliothèque ---------- */
 function tabsHTML(cur){ return '<nav class="tabs" aria-label="Sections"><a href="#accueil" class="tab'+(cur==="lecons"?" on":"")+'">Leçons</a><a href="#morceaux" class="tab'+(cur==="morceaux"?" on":"")+'">Morceaux</a></nav>'; }
 function library(flash){
   stopPlayer(); input.listener=null; input.pedalListener=null; showDock(false); document.body.classList.remove("playing");
-  const imps=getImports(); const best=store.get("best",{});
-  imps.forEach(it=>{ if(!it.cat) it.cat=guessCat(it.name,it.meta); });
-  const filter=store.get("catFilter","Tous");
-  const groups={}; imps.forEach(it=>{ (groups[it.cat]=groups[it.cat]||[]).push(it); });
-  const order=allCats().filter(c=>groups[c]).concat(Object.keys(groups).filter(c=>c!==UNSORTED&&!allCats().includes(c))).concat(groups[UNSORTED]?[UNSORTED]:[]);
-  let h=tabsHTML("morceaux")+'<section class="hero"><h1>Joue des morceaux, note après note.</h1><p>Les notes tombent vers le clavier. En mode attente, le morceau s\'arrête jusqu\'à ce que tu joues la bonne note sur ton piano.</p></section>';
-  // Mes morceaux en premier : c'est ce que l'on rouvre le plus
-  h+='<section class="chapter" id="mine"><div class="mine-head"><h2>Mes morceaux · '+imps.length+'</h2><span class="mine-act"><button class="btn" id="bk-open">Sauvegarde</button><label class="btn primary file-btn" for="midi-file">Importer des fichiers MIDI</label></span><input type="file" id="midi-file" accept=".mid,.midi,audio/midi,audio/x-midi" multiple hidden></div>';
+  const imps=enrich(getImports()); const best=store.get("best",{});
+  let h=tabsHTML("morceaux");
+  h+='<section class="chapter mine" id="mine"><div class="mine-head"><div><h1 class="lib-h">Mes morceaux</h1><p class="lib-sub">'+(imps.length?imps.length+' fichier'+(imps.length>1?'s':'')+' importé'+(imps.length>1?'s':''):'Tes fichiers MIDI, rangés par catégorie et par titre.')+'</p></div>'+
+     '<span class="mine-act"><button class="btn" id="bk-open">Sauvegarde</button><label class="btn primary file-btn" for="midi-file">+ Importer</label><input type="file" id="midi-file" accept=".mid,.midi,audio/midi,audio/x-midi" multiple hidden></span></div>';
   h+='<p class="nudge" id="bk-nudge"'+(needsBackup()?'':' hidden')+'>Des morceaux ne sont pas encore sauvegardés. <button class="mini" id="bk-nudge-btn">Sauvegarder maintenant</button></p>';
   h+='<div class="feedback" id="imp-msg" aria-live="polite"></div>';
-  if(!imps.length) h+='<p class="empty">Aucun fichier pour l\'instant. Touche « Importer des fichiers MIDI » et sélectionne tous tes fichiers .mid d\'un coup (appui long sur le premier, puis touche les autres). Ils sont classés automatiquement d\'après leur nom.</p>';
-  else {
-    h+='<div class="cat-filter" role="group" aria-label="Filtrer par catégorie"><button data-filter="Tous" aria-pressed="'+(filter==="Tous")+'">Tous <i>'+imps.length+'</i></button>'+order.map(c=>'<button data-filter="'+esc(c)+'" aria-pressed="'+(filter===c)+'">'+esc(c)+' <i>'+groups[c].length+'</i></button>').join("")+'</div>';
-    order.forEach(c=>{ if(filter!=="Tous"&&filter!==c) return;
-      h+='<div class="cat-block"><h3 class="cat-h'+(c===UNSORTED?' todo':'')+'">'+esc(c)+'</h3>';
-      groups[c].slice().sort((a,b)=>a.name.localeCompare(b.name,"fr")).forEach(it=>{
-        h+='<div class="imp-row"><a class="imp-link" href="#jouer-'+it.id+'"><span class="t">'+esc(it.name)+'</span><span class="s">'+(best[it.id]?'Déjà joué ✓ · ':'')+'Importé le '+new Date(it.at).toLocaleDateString("fr-FR")+'</span></a><button class="mini" data-edit="'+it.id+'" aria-label="Classer ou modifier '+esc(it.name)+'">Classer</button></div>'; });
-      h+='</div>'; });
-  }
+  if(!imps.length) h+='<div class="empty-card"><p><b>Aucun morceau importé.</b></p><ol><li>Télécharge des fichiers .mid (MuseScore, Mutopia…).</li><li>Touche « + Importer » et sélectionne-les tous d\'un coup : appui long sur le premier, puis touche les autres.</li><li>Ils sont rangés automatiquement par catégorie et par titre.</li></ol></div>';
+  else h+='<div class="lib-tools"><input type="search" class="txt search" id="lib-q" placeholder="Rechercher un titre…" aria-label="Rechercher un morceau" value="'+esc(store.get("libQ",""))+'"><div class="cat-filter" id="cat-filter" role="group" aria-label="Filtrer par catégorie"></div></div><div id="mine-list"></div>'+
+    '<p class="legend"><span class="dpill d1">Facile</span><span class="dpill d2">Intermédiaire</span><span class="dpill d3">Difficile</span> estimé d\'après le nombre de notes par seconde. Tu peux le corriger avec « Modifier ».</p>';
   h+='</section>';
-  h+='<section class="chapter"><h2>Bibliothèque · domaine public</h2>';
+  h+='<details class="chapter builtin"'+(imps.length?'':' open')+'><summary><span><b>Morceaux inclus</b><small>5 pièces du domaine public, avec 2 ou 3 niveaux chacune</small></span></summary>';
   LIB.forEach(d=>{ h+='<div class="song-row"><span class="song-txt"><span class="t">'+d.title+'</span><span class="s">'+d.composer+'</span><span class="d">'+d.desc+'</span><span class="lv-list" style="--n:'+d.levels.length+'">'+
     d.levels.map((lv,i)=>'<a class="lv-chip lv-'+(i+1)+'" href="#jouer-'+d.id+'-n'+(i+1)+'"><b>Niveau '+(i+1)+'</b><span>'+lv.n+(best[d.id+"-n"+(i+1)]?' · joué ✓':'')+'</span><small>'+lv.d+'</small></a>').join("")+'</span></span></div>'; });
-  h+='<p class="note-box">Où trouver des fichiers MIDI : MuseScore.com permet de télécharger une partition au format MIDI (souvent avec abonnement), et le logiciel gratuit MuseScore exporte en MIDI n\'importe quelle partition ouverte. Les fichiers trouvés au hasard sur internet sont de qualité très variable.</p><p class="note-box">Son du piano de l\'appli : échantillons de vrai piano du projet tonejs-instruments (licence MIT).</p></section>';
+  h+='</details>';
+  h+='<p class="note-box">Où trouver des fichiers MIDI : MuseScore.com permet de télécharger une partition au format MIDI (souvent avec abonnement), et le logiciel gratuit MuseScore exporte en MIDI n\'importe quelle partition ouverte.</p><p class="note-box">Son du piano de l\'appli : échantillons de vrai piano du projet tonejs-instruments (licence MIT).</p>';
   view.innerHTML=h;
   const msg=document.getElementById("imp-msg");
   if(flash){ msg.className="feedback "+(flash.bad?"bad":"ok"); msg.innerHTML=flash.html; }
-  view.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{ store.set("catFilter",b.dataset.filter); library(); });
-  view.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editSheet(b.dataset.edit));
   document.getElementById("bk-open").onclick=()=>backupSheet(); const nb=document.getElementById("bk-nudge-btn"); if(nb) nb.onclick=()=>backupSheet();
+  if(imps.length){ renderMine(); const q=document.getElementById("lib-q"); q.oninput=()=>{ store.set("libQ",q.value); renderMine(); }; }
   const fi=document.getElementById("midi-file");
   fi.onchange=async()=>{ const files=[...(fi.files||[])]; if(!files.length)return;
     msg.className="feedback"; msg.textContent="Lecture de "+files.length+" fichier"+(files.length>1?"s":"")+"…";
@@ -938,7 +1007,8 @@ function library(flash){
       let buf; try{ buf=await f.arrayBuffer(); }catch(e){ failed.push([f.name,"illisible"]); continue; }
       let s; try{ s=parseMidi(buf); }catch(e){ failed.push([f.name,e.message&&e.message.includes("MIDI")?"pas un fichier MIDI":"aucune note de piano"]); continue; }
       const name=cleanName(f.name); const it={id:"import-"+Date.now()+"-"+Math.floor(Math.random()*1e4),name,at:Date.now(),size:f.size,meta:(s.meta||"").slice(0,200),b64:b64e(buf)};
-      it.cat=guessCat(name,it.meta); list.push(it);
+      it.cat=guessCat(name,it.meta); const sp=splitTitle(name,it.cat); it.title=sp.title; it.ver=sp.ver; it.stats=midiStats(s); it.diff=sp.hint;
+      list.push(it);
       if(!saveImports(list)){ list.pop(); full=true; failed.push([f.name,"stockage plein"]); break; }
       added.push(it);
     }
@@ -946,33 +1016,67 @@ function library(flash){
     if(added.length===1&&files.length===1){ location.hash="jouer-"+added[0].id; return; }
     const byCat={}; added.forEach(a=>byCat[a.cat]=(byCat[a.cat]||0)+1);
     let html=added.length?'<b>'+added.length+' morceau'+(added.length>1?'x':'')+' ajouté'+(added.length>1?'s':'')+'</b> : '+Object.keys(byCat).map(c=>esc(c)+' '+byCat[c]).join(", ")+'.':'Aucun morceau ajouté.';
-    if(byCat[UNSORTED]) html+=' Touche « Classer » sur ceux « À classer ».';
+    if(byCat[UNSORTED]) html+=' Ouvre la catégorie « À classer » pour les ranger.';
     if(skipped.length) html+='<br>Déjà présents, ignorés : '+skipped.length+'.';
     if(failed.length) html+='<br>Non importés : '+failed.map(x=>esc(x[0])+' ('+x[1]+')').join(", ")+'.';
     if(full) html+='<br>Le stockage du navigateur est plein : supprime des morceaux que tu ne joues plus.';
-    store.set("catFilter","Tous"); library({html,bad:!added.length&&failed.length>0});
-    const m=document.getElementById("mine"); if(m) m.scrollIntoView({block:"start"});
+    store.set("catFilter","Tous"); store.set("libQ",""); library({html,bad:!added.length&&failed.length>0});
   };
   window.scrollTo(0,0);
 }
+function renderMine(){
+  const box=document.getElementById("mine-list"); if(!box) return;
+  const imps=getImports(); const best=store.get("best",{}); const q=normTxt(store.get("libQ","")).trim();
+  let filter=store.get("catFilter","Tous");
+  const groups={}; imps.forEach(it=>{ (groups[it.cat]=groups[it.cat]||[]).push(it); });
+  const order=allCats().filter(c=>groups[c]).concat(Object.keys(groups).filter(c=>c!==UNSORTED&&!allCats().includes(c))).concat(groups[UNSORTED]?[UNSORTED]:[]);
+  if(filter!=="Tous"&&!groups[filter]) filter="Tous";
+  document.getElementById("cat-filter").innerHTML='<button data-filter="Tous" aria-pressed="'+(filter==="Tous")+'">Tout <i>'+imps.length+'</i></button>'+order.map(c=>'<button data-filter="'+esc(c)+'" aria-pressed="'+(filter===c)+'"'+(c===UNSORTED?' class="todo"':'')+'>'+esc(c)+' <i>'+groups[c].length+'</i></button>').join("");
+  document.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{ store.set("catFilter",b.dataset.filter); renderMine(); });
+  let h="", shown=0;
+  order.forEach(c=>{ if(filter!=="Tous"&&filter!==c) return;
+    const items=groups[c].filter(it=>!q||normTxt(it.title+" "+it.name+" "+(it.ver||"")).includes(q)); if(!items.length) return;
+    const songs={}; items.forEach(it=>{ const k=songKey(it.title||it.name); (songs[k]=songs[k]||{title:it.title||it.name,v:[]}).v.push(it); });
+    const keys=Object.keys(songs).sort((a,b)=>songs[a].title.localeCompare(songs[b].title,"fr"));
+    h+='<section class="cat-block"><h2 class="cat-h'+(c===UNSORTED?' todo':'')+'">'+esc(c)+'<small>'+keys.length+' titre'+(keys.length>1?'s':'')+'</small></h2>';
+    if(c===UNSORTED) h+='<p class="hint-txt">L\'appli n\'a pas reconnu ces fichiers. Touche « Modifier » pour choisir leur catégorie.</p>';
+    keys.forEach(k=>{ const sg=songs[k]; const vs=sg.v.sort((a,b)=>(itemLevel(a)||9)-(itemLevel(b)||9)||a.at-b.at); shown+=vs.length;
+      h+='<article class="song-card"><h3>'+esc(sg.title)+(vs.length>1?'<span class="vcount">'+vs.length+' versions</span>':'')+'</h3>';
+      vs.forEach((it,i)=>{ const lv=itemLevel(it); const st=it.stats||{};
+        const label=it.ver||(vs.length>1?"Version "+(i+1):"");
+        h+='<div class="ver-row"><a class="ver-link" href="#jouer-'+it.id+'"><span class="dpill d'+lv+'">'+(lv?DIFF[lv]:"?")+(it.diff&&it.diff!=="auto"?"":"")+'</span><span class="ver-txt">'+(label?'<b>'+esc(label)+'</b>':'')+'<span>'+(st.dur?fmtDur(st.dur)+' · '+String(st.nps).replace(".",",")+' notes/s':'')+(best[it.id]?' · joué ✓':'')+'</span></span><span class="go" aria-hidden="true">▶</span></a>'+
+           '<button class="mini" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title+(label?" "+label:""))+'">Modifier</button></div>'; });
+      h+='</article>'; });
+    h+='</section>'; });
+  if(!shown) h='<p class="empty">Aucun morceau ne correspond à « '+esc(store.get("libQ",""))+' ».</p>';
+  box.innerHTML=h;
+  box.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editSheet(b.dataset.edit));
+}
 function editSheet(id){
-  const list=getImports(); const it=list.find(x=>x.id===id); if(!it) return;
-  const cur=it.cat||guessCat(it.name,it.meta);
-  const cats=allCats().concat(cur!==UNSORTED&&!allCats().includes(cur)?[cur]:[]);
-  openSheet("edit",'<h2>Classer ce morceau</h2><label class="fld" for="ed-name">Titre</label><input class="txt" id="ed-name" value="'+esc(it.name)+'" maxlength="80">'+
+  const list=enrich(getImports()); const it=list.find(x=>x.id===id); if(!it) return;
+  const cur=it.cat; const cats=allCats().concat(cur!==UNSORTED&&!allCats().includes(cur)?[cur]:[]);
+  const titles=[...new Set(list.map(x=>x.title))].sort((a,b)=>a.localeCompare(b,"fr"));
+  const st=it.stats||{};
+  openSheet("edit",'<h2>Modifier</h2><p class="hint-txt">Fichier : '+esc(it.name)+'</p>'+
+    '<label class="fld" for="ed-title">Titre du morceau</label><input class="txt" id="ed-title" list="ed-titles" value="'+esc(it.title)+'" maxlength="80"><datalist id="ed-titles">'+titles.map(t=>'<option value="'+esc(t)+'">').join("")+'</datalist>'+
+    '<p class="hint-txt">Deux fichiers avec le même titre sont regroupés comme deux versions d\'un même morceau.</p>'+
+    '<label class="fld" for="ed-ver">Nom de cette version</label><input class="txt" id="ed-ver" value="'+esc(it.ver||"")+'" placeholder="Ex. : Facile, Animenz, Version courte…" maxlength="40">'+
+    '<p class="fld">Difficulté</p><div class="cat-pick" role="radiogroup" aria-label="Difficulté">'+
+      [["auto","Auto"+(st.lvl?" ("+DIFF[st.lvl]+")":"")],["1","Facile"],["2","Intermédiaire"],["3","Difficile"]].map(([v,l])=>'<button role="radio" data-diff="'+v+'" aria-checked="'+(String(it.diff||"auto")===v)+'">'+l+'</button>').join("")+'</div>'+
     '<p class="fld">Catégorie</p><div class="cat-pick" role="radiogroup" aria-label="Catégorie">'+cats.concat([UNSORTED]).map(c=>'<button role="radio" data-cat="'+esc(c)+'" aria-checked="'+(c===cur)+'">'+esc(c)+'</button>').join("")+'</div>'+
     '<label class="fld" for="ed-new">Ou une nouvelle catégorie</label><input class="txt" id="ed-new" placeholder="Ex. : One Piece, Films, Jazz…" maxlength="30">'+
-    '<p class="hint-txt">Une nouvelle catégorie sert aussi au classement automatique : un fichier dont le nom la contient y sera rangé.</p>'+
-    '<div class="row"><button class="btn primary" id="ed-save">Enregistrer</button><button class="btn" data-close>Annuler</button><button class="btn danger" id="ed-del">Supprimer le morceau</button></div>');
-  let pick=cur;
+    '<div class="row"><button class="btn primary" id="ed-save">Enregistrer</button><button class="btn" data-close>Annuler</button><button class="btn danger" id="ed-del">Supprimer</button></div>');
+  let pick=cur, diff=String(it.diff||"auto");
   document.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{ pick=b.dataset.cat; document.querySelectorAll("[data-cat]").forEach(x=>x.setAttribute("aria-checked",x===b)); document.getElementById("ed-new").value=""; });
-  document.getElementById("ed-save").onclick=()=>{ const nw=document.getElementById("ed-new").value.trim(); const name=document.getElementById("ed-name").value.trim()||it.name;
+  document.querySelectorAll("[data-diff]").forEach(b=>b.onclick=()=>{ diff=b.dataset.diff; document.querySelectorAll("[data-diff]").forEach(x=>x.setAttribute("aria-checked",x===b)); });
+  document.getElementById("ed-save").onclick=()=>{ const nw=document.getElementById("ed-new").value.trim();
+    const title=document.getElementById("ed-title").value.trim()||it.title; const ver=document.getElementById("ed-ver").value.trim();
     let cat=pick; if(nw){ cat=nw; const uc=userCats(); if(!allCats().includes(nw)){ uc.push(nw); store.set("cats",uc); } }
-    const l2=getImports(); const x=l2.find(y=>y.id===id); if(x){ x.cat=cat; x.name=name; saveImports(l2); } closeSheet(); library({html:'« '+esc(name)+' » rangé dans <b>'+esc(cat)+'</b>.'}); };
+    const l2=getImports(); const x=l2.find(y=>y.id===id); if(x){ x.cat=cat; x.title=title; x.ver=ver; x.diff=diff; saveImports(l2); }
+    closeSheet(); library({html:'« '+esc(title)+(ver?' · '+esc(ver):'')+' » enregistré dans <b>'+esc(cat)+'</b>.'}); };
   const del=document.getElementById("ed-del"); del.onclick=()=>{ if(del.dataset.c!=="1"){ del.dataset.c="1"; del.textContent="Confirmer la suppression"; return; }
-    saveImports(getImports().filter(y=>y.id!==id)); closeSheet(); library({html:'« '+esc(it.name)+' » supprimé.'}); };
+    saveImports(getImports().filter(y=>y.id!==id)); closeSheet(); library({html:'« '+esc(it.title)+' » supprimé.'}); };
 }
-
 
 /* ---------- Sauvegarde ---------- */
 const PFX="atelier-piano:";
