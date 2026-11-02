@@ -183,6 +183,9 @@ input[type=range]{width:100%;accent-color:var(--felt)}
 .mine-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
 .mine-head h2{margin:0}
 .mine-head .file-btn{margin:0}
+.mine-act{display:flex;gap:8px;flex-wrap:wrap}
+.nudge{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--bad-soft);color:var(--bad);border-radius:10px;padding:10px 12px;font-size:14px;margin:6px 0 10px}
+.nudge .mini{border-color:var(--bad);color:var(--bad);background:transparent}
 .cat-filter{display:flex;gap:6px;overflow-x:auto;padding:4px 0 10px;scrollbar-width:none}
 .cat-filter button{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer;white-space:nowrap}
 .cat-filter button i{font-style:normal;color:var(--muted);font-family:var(--f-mono);font-size:12px;margin-left:2px}
@@ -868,7 +871,7 @@ function assignHands(song,method){
 const b64e=buf=>{ let s=""; const u=new Uint8Array(buf); for(let i=0;i<u.length;i+=0x8000) s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000)); return btoa(s); };
 const b64d=str=>{ const s=atob(str); const u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u.buffer; };
 function getImports(){ return store.get("imports",[]); }
-function saveImports(list){ try{ localStorage.setItem("atelier-piano:imports",JSON.stringify(list)); return true; }catch(e){ return false; } }
+function saveImports(list){ try{ localStorage.setItem("atelier-piano:imports",JSON.stringify(list)); markDirty(); return true; }catch(e){ return false; } }
 function loadImport(id){ const it=getImports().find(x=>x.id===id); if(!it) return null;
   const s=parseMidi(b64d(it.b64)); s.id=id; s.title=it.name; s.sub=(it.cat||guessCat(it.name,it.meta))+" · fichier importé"; assignHands(s,store.get("hands-"+id,"pistes")); return s; }
 
@@ -902,7 +905,8 @@ function library(flash){
   const order=allCats().filter(c=>groups[c]).concat(Object.keys(groups).filter(c=>c!==UNSORTED&&!allCats().includes(c))).concat(groups[UNSORTED]?[UNSORTED]:[]);
   let h=tabsHTML("morceaux")+'<section class="hero"><h1>Joue des morceaux, note après note.</h1><p>Les notes tombent vers le clavier. En mode attente, le morceau s\'arrête jusqu\'à ce que tu joues la bonne note sur ton piano.</p></section>';
   // Mes morceaux en premier : c'est ce que l'on rouvre le plus
-  h+='<section class="chapter" id="mine"><div class="mine-head"><h2>Mes morceaux · '+imps.length+'</h2><label class="btn primary file-btn" for="midi-file">Importer des fichiers MIDI</label><input type="file" id="midi-file" accept=".mid,.midi,audio/midi,audio/x-midi" multiple hidden></div>';
+  h+='<section class="chapter" id="mine"><div class="mine-head"><h2>Mes morceaux · '+imps.length+'</h2><span class="mine-act"><button class="btn" id="bk-open">Sauvegarde</button><label class="btn primary file-btn" for="midi-file">Importer des fichiers MIDI</label></span><input type="file" id="midi-file" accept=".mid,.midi,audio/midi,audio/x-midi" multiple hidden></div>';
+  h+='<p class="nudge" id="bk-nudge"'+(needsBackup()?'':' hidden')+'>Des morceaux ne sont pas encore sauvegardés. <button class="mini" id="bk-nudge-btn">Sauvegarder maintenant</button></p>';
   h+='<div class="feedback" id="imp-msg" aria-live="polite"></div>';
   if(!imps.length) h+='<p class="empty">Aucun fichier pour l\'instant. Touche « Importer des fichiers MIDI » et sélectionne tous tes fichiers .mid d\'un coup (appui long sur le premier, puis touche les autres). Ils sont classés automatiquement d\'après leur nom.</p>';
   else {
@@ -923,6 +927,7 @@ function library(flash){
   if(flash){ msg.className="feedback "+(flash.bad?"bad":"ok"); msg.innerHTML=flash.html; }
   view.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{ store.set("catFilter",b.dataset.filter); library(); });
   view.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editSheet(b.dataset.edit));
+  document.getElementById("bk-open").onclick=()=>backupSheet(); const nb=document.getElementById("bk-nudge-btn"); if(nb) nb.onclick=()=>backupSheet();
   const fi=document.getElementById("midi-file");
   fi.onchange=async()=>{ const files=[...(fi.files||[])]; if(!files.length)return;
     msg.className="feedback"; msg.textContent="Lecture de "+files.length+" fichier"+(files.length>1?"s":"")+"…";
@@ -937,6 +942,7 @@ function library(flash){
       if(!saveImports(list)){ list.pop(); full=true; failed.push([f.name,"stockage plein"]); break; }
       added.push(it);
     }
+    try{ navigator.storage&&navigator.storage.persist&&navigator.storage.persist(); }catch(e){}
     if(added.length===1&&files.length===1){ location.hash="jouer-"+added[0].id; return; }
     const byCat={}; added.forEach(a=>byCat[a.cat]=(byCat[a.cat]||0)+1);
     let html=added.length?'<b>'+added.length+' morceau'+(added.length>1?'x':'')+' ajouté'+(added.length>1?'s':'')+'</b> : '+Object.keys(byCat).map(c=>esc(c)+' '+byCat[c]).join(", ")+'.':'Aucun morceau ajouté.';
@@ -966,6 +972,61 @@ function editSheet(id){
   const del=document.getElementById("ed-del"); del.onclick=()=>{ if(del.dataset.c!=="1"){ del.dataset.c="1"; del.textContent="Confirmer la suppression"; return; }
     saveImports(getImports().filter(y=>y.id!==id)); closeSheet(); library({html:'« '+esc(it.name)+' » supprimé.'}); };
 }
+
+
+/* ---------- Sauvegarde ---------- */
+const PFX="atelier-piano:";
+const NO_BACKUP=["imports","midiAuto","catFilter","lastBackup","dirtyAt"];
+function lsKeys(){ const k=[]; try{ for(let i=0;i<localStorage.length;i++){ const x=localStorage.key(i); if(x&&x.startsWith(PFX)) k.push(x.slice(PFX.length)); } }catch(e){} return k; }
+function markDirty(){ store.set("dirtyAt",Date.now()); }
+function needsBackup(){ return getImports().length>0&&store.get("dirtyAt",0)>store.get("lastBackup",0); }
+function backupFile(asText){
+  const data={}; lsKeys().forEach(k=>{ if(!NO_BACKUP.includes(k)) data[k]=store.get(k,null); });
+  const payload={app:"atelier-piano",version:1,date:new Date().toISOString(),imports:getImports(),data};
+  const d=new Date(); const stamp=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  const name="atelier-piano-sauvegarde-"+stamp+(asText?".txt":".json");
+  return new File([JSON.stringify(payload)],name,{type:asText?"text/plain":"application/json"});
+}
+function markBackup(){ store.set("lastBackup",Date.now()); }
+function restoreBackup(text){
+  let p; try{ p=JSON.parse(text); }catch(e){ throw new Error("Ce fichier n'est pas une sauvegarde Atelier Piano."); }
+  if(!p||p.app!=="atelier-piano"||!Array.isArray(p.imports)) throw new Error("Ce fichier n'est pas une sauvegarde Atelier Piano.");
+  const list=getImports(); let added=0, already=0;
+  p.imports.forEach(it=>{ if(!it||!it.id||!it.b64||!it.name) return;
+    if(list.some(x=>x.id===it.id||(x.name===it.name&&x.size&&x.size===it.size))){ already++; return; }
+    list.push(it); added++; });
+  if(!saveImports(list)) throw new Error("Le stockage du navigateur est plein : la sauvegarde contient trop de morceaux pour ce téléphone.");
+  const dt=p.data||{};
+  Object.keys(dt).forEach(k=>{ const v=dt[k];
+    if(k==="done"||k==="best"){ const cur=store.get(k,{}); Object.keys(v||{}).forEach(x=>{ if(v[x]) cur[x]=v[x]; }); store.set(k,cur); }
+    else if(k==="cats"){ const cur=store.get("cats",[]); (v||[]).forEach(c=>{ if(!cur.includes(c)) cur.push(c); }); store.set("cats",cur); }
+    else if(k==="checks"){ const cur=store.get("checks",{}); Object.keys(v||{}).forEach(x=>{ if(!cur[x]) cur[x]=v[x]; }); store.set("checks",cur); }
+    else if(store.get(k,null)===null) store.set(k,v); });
+  S.done=store.get("done",{}); S.checks=store.get("checks",{});
+  markBackup();
+  return {added,already,date:p.date};
+}
+function backupSheet(note){
+  const last=store.get("lastBackup",0); const n=getImports().length;
+  const canShare=(()=>{ try{ return !!(navigator.canShare&&navigator.canShare({files:[backupFile(true)]})); }catch(e){ return false; } })();
+  openSheet("backup",'<h2>Sauvegarde</h2><p>Tes morceaux importés ('+n+'), tes catégories et ta progression sont enregistrés seulement dans Chrome, sur ce téléphone. Une sauvegarde les met dans un fichier que tu peux garder sur Google Drive et restaurer sur n\'importe quel appareil.</p>'+
+    '<p class="hint-txt">'+(last?'Dernière sauvegarde : '+new Date(last).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})+'.':'Aucune sauvegarde pour l\'instant.')+(needsBackup()?' Des changements ne sont pas encore sauvegardés.':'')+'</p>'+
+    '<div class="row">'+(canShare?'<button class="btn primary" id="bk-share">Envoyer vers Drive…</button>':'')+'<button class="btn'+(canShare?'':' primary')+'" id="bk-dl">Télécharger le fichier</button></div>'+
+    (canShare?'<p class="hint-txt">« Envoyer vers Drive » ouvre le menu de partage d\'Android : choisis Drive, puis un dossier.</p>':'')+
+    '<p class="fld">Restaurer</p><p class="hint-txt">Choisis un fichier de sauvegarde. Les morceaux déjà présents ne sont pas dupliqués, rien n\'est effacé.</p>'+
+    '<div class="row"><label class="btn" for="bk-file">Restaurer une sauvegarde</label><input type="file" id="bk-file" accept=".json,.txt,application/json,text/plain" hidden><button class="btn" data-close>Fermer</button></div>'+
+    '<p class="feedback" id="bk-msg">'+(note||'')+'</p>');
+  const m=document.getElementById("bk-msg"); const say=(t,c)=>{ m.className="feedback "+(c||""); m.textContent=t; };
+  if(canShare) document.getElementById("bk-share").onclick=async()=>{ try{ await navigator.share({files:[backupFile(true)],title:"Sauvegarde Atelier Piano"}); markBackup(); say("Sauvegarde envoyée.","ok"); refreshNudge(); }catch(e){ if(e&&e.name==="AbortError") say("Envoi annulé."); else say("Le partage n'a pas marché. Utilise « Télécharger le fichier ».","bad"); } };
+  document.getElementById("bk-dl").onclick=()=>{ try{ const f=backupFile(false); const url=URL.createObjectURL(f); const a=document.createElement("a"); a.href=url; a.download=f.name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },3000);
+      markBackup(); say("Fichier « "+f.name+" » enregistré dans Téléchargements. Pense à le copier sur Drive.","ok"); refreshNudge(); }catch(e){ say("Le téléchargement n'a pas marché ici.","bad"); } };
+  const fi=document.getElementById("bk-file"); fi.onchange=async()=>{ const f=fi.files&&fi.files[0]; if(!f)return;
+    try{ const r=restoreBackup(await f.text()); closeSheet();
+      if(location.hash==="#morceaux") library({html:'Sauvegarde restaurée : <b>'+r.added+' morceau'+(r.added>1?'x':'')+' ajouté'+(r.added>1?'s':'')+'</b>'+(r.already?', '+r.already+' déjà présent'+(r.already>1?'s':''):'')+'.'}); else route();
+    }catch(e){ say(e.message,"bad"); } };
+}
+function refreshNudge(){ const b=document.getElementById("bk-nudge"); if(b) b.hidden=!needsBackup(); }
+try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persisted().then(p=>{ if(!p&&getImports().length) navigator.storage.persist(); }); }catch(e){}
 
 /* ---------- Lecteur ---------- */
 let P=null;
