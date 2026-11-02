@@ -160,12 +160,21 @@ input[type=range]{width:100%;accent-color:var(--felt)}
 .tab{padding:7px 16px;border-radius:999px;text-decoration:none;color:var(--muted);font-size:14px;font-weight:700}
 .tab.on{background:var(--felt);color:#fff}
 /* Bibliothèque */
-.song-row{display:grid;grid-template-columns:92px 1fr;gap:12px;align-items:start;text-decoration:none;color:inherit;border-top:1px solid var(--line);padding:14px 2px;flex:1;min-width:0}
+.song-row{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;text-decoration:none;color:inherit;border-top:1px solid var(--line);padding:14px 2px;flex:1;min-width:0}
 .chapter>.song-row:last-of-type{border-bottom:1px solid var(--line)}
 .song-txt{min-width:0}
 .song-row .t{font-weight:700;display:block}
 .song-row .s{font-size:14px;color:var(--muted);display:block}
 .song-row .d{font-size:14px;display:block;margin-top:4px;max-width:56ch}
+.lv-list{display:grid;grid-template-columns:repeat(var(--n,3),minmax(0,1fr));gap:8px;margin-top:10px}
+@media (max-width:520px){.lv-list{grid-template-columns:1fr}.lv-chip{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:baseline}.lv-chip small{grid-column:1/-1}}
+.lv-chip{display:flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 11px;min-width:0}
+.lv-chip b{font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.lv-chip span{font-weight:700;font-size:14px}
+.lv-chip small{font-size:12.5px;color:var(--muted);line-height:1.35}
+.lv-1 b{color:var(--ok)} .lv-2 b{color:var(--felt)} .lv-3 b{color:var(--bad)}
+.lv-chip:hover{border-color:var(--felt)}
+.lbl-niv{font-size:14px}
 .lvl{font-size:12px;font-weight:700;border-radius:999px;padding:3px 9px;text-align:center;border:1px solid var(--line);color:var(--muted);margin-top:2px}
 .lvl-1{background:var(--ok-soft);color:var(--ok);border-color:transparent}
 .lvl-2{background:var(--felt-soft);color:var(--felt);border-color:transparent}
@@ -225,7 +234,7 @@ body.playing main{padding-block:12px 12px}
   .pl-status{margin:6px 0;min-height:26px;font-size:13px}
   .rotate{display:none}
 }
-@media (max-width:420px){.song-row{grid-template-columns:1fr}.lvl{justify-self:start}}
+
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -278,16 +287,39 @@ const save=()=>{store.set("done",S.done);store.set("checks",S.checks);store.set(
 
 /* ---------- Son ---------- */
 let ac=null;
-function ctx(){ if(!ac){try{ac=new (window.AudioContext||window.webkitAudioContext)()}catch(e){return null}} if(ac.state==="suspended")ac.resume(); return ac; }
+let master=null;
+const SAMPLE_NOTES=[]; for(let o=1;o<=7;o++) [["C",0],["Ds",3],["Fs",6],["A",9]].forEach(([n,q])=>SAMPLE_NOTES.push({name:n+o,m:(o+1)*12+q}));
+const SAMPLES={}; let samplesAsked=false;
+function ctx(){ if(!ac){ try{ac=new (window.AudioContext||window.webkitAudioContext)()}catch(e){return null}
+    // Chaîne de sortie : compresseur doux + petite réverbération de salle
+    try{ const comp=ac.createDynamicsCompressor(); comp.threshold.value=-18; comp.knee.value=12; comp.ratio.value=3; comp.attack.value=.004; comp.release.value=.25;
+      master=ac.createGain(); master.gain.value=.9; const dry=ac.createGain(); dry.gain.value=1; const wet=ac.createGain(); wet.gain.value=.16;
+      const conv=ac.createConvolver(); const len=Math.floor(ac.sampleRate*1.8); const ir=ac.createBuffer(2,len,ac.sampleRate);
+      for(let c=0;c<2;c++){ const d=ir.getChannelData(c); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3.2); }
+      conv.buffer=ir; master.connect(dry); master.connect(conv); conv.connect(wet); dry.connect(comp); wet.connect(comp); comp.connect(ac.destination);
+    }catch(e){ master=ac.destination; }
+    loadSamples(); }
+  if(ac.state==="suspended")ac.resume(); return ac; }
+function loadSamples(){ if(samplesAsked||!ac||!window.fetch)return; samplesAsked=true;
+  SAMPLE_NOTES.forEach(sn=>{ fetch("sons/"+sn.name+".mp3").then(r=>{ if(!r.ok)throw new Error(r.status); return r.arrayBuffer(); })
+    .then(b=>new Promise((res,rej)=>ac.decodeAudioData(b,res,rej))).then(buf=>{ SAMPLES[sn.m]=buf; }).catch(()=>{}); }); }
+function nearestSample(m){ let best=null,bd=99; for(const k in SAMPLES){ const d=Math.abs(m-k); if(d<bd){bd=d;best=+k} } return bd<=4?best:null; }
 function tone(m,when=0,dur=1.4,vel=.8){
-  if(!S.sound)return; const a=ctx(); if(!a)return; const t=a.currentTime+when; const f=440*Math.pow(2,(m-69)/12);
+  if(!S.sound)return; const a=ctx(); if(!a)return; const t=a.currentTime+when; const sm=nearestSample(m);
+  if(sm!==null){ // vrai piano échantillonné
+    const src=a.createBufferSource(); src.buffer=SAMPLES[sm]; src.playbackRate.value=Math.pow(2,(m-sm)/12);
+    const g=a.createGain(); const peak=.55*vel; g.gain.setValueAtTime(peak,t);
+    const hold=Math.max(.25,dur); g.gain.setTargetAtTime(0,t+hold,.18);
+    src.connect(g); g.connect(master); src.start(t); src.stop(t+hold+1.2); return; }
+  const f=440*Math.pow(2,(m-69)/12);
   const g=a.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(.22*vel,t+.006); g.gain.exponentialRampToValueAtTime(.0008,t+dur);
   const lp=a.createBiquadFilter(); lp.type="lowpass"; lp.frequency.setValueAtTime(Math.min(9000,f*7),t); lp.frequency.exponentialRampToValueAtTime(Math.max(300,f*1.5),t+dur);
   const o1=a.createOscillator(); o1.type="triangle"; o1.frequency.value=f;
   const o2=a.createOscillator(); o2.type="sine"; o2.frequency.value=f*2.003; const g2=a.createGain(); g2.gain.value=.25;
-  o1.connect(g); o2.connect(g2); g2.connect(g); g.connect(lp); lp.connect(a.destination);
+  o1.connect(g); o2.connect(g2); g2.connect(g); g.connect(lp); lp.connect(master||a.destination);
   o1.start(t); o2.start(t); o1.stop(t+dur+.05); o2.stop(t+dur+.05);
 }
+document.addEventListener("pointerdown",()=>ctx(),{once:true,capture:true});
 function tick(when,accent){ const a=ctx(); if(!a)return; const t=a.currentTime+when; const o=a.createOscillator(); const g=a.createGain();
   o.type="square"; o.frequency.value=accent?1500:1000; g.gain.setValueAtTime(.12,t); g.gain.exponentialRampToValueAtTime(.0005,t+.05); o.connect(g); g.connect(a.destination); o.start(t); o.stop(t+.06); }
 function playSeq(ms,gap=.42){ ms.forEach((m,i)=>{ if(Array.isArray(m)) m.forEach(x=>tone(x,i*gap)); else tone(m,i*gap); }); }
@@ -322,7 +354,7 @@ function setHints(pcs){ hintSet=new Set(pcs||[]); applyHints(); }
 function flash(m,cls){ const e=keyEl(m)||null; const all=e?[e]:[...keysEl.querySelectorAll("[data-m]")].filter(x=>pc(+x.dataset.m)===pc(m));
   all.forEach(x=>{x.classList.add(cls); setTimeout(()=>x.classList.remove(cls),450)}); }
 keysEl.addEventListener("pointerdown",e=>{ const k=e.target.closest("[data-m]"); if(!k)return; e.preventDefault(); const m=+k.dataset.m;
-  k.classList.add("down"); setTimeout(()=>k.classList.remove("down"),180); tone(m); input.on(m,"screen"); });
+  k.classList.add("down"); setTimeout(()=>k.classList.remove("down"),180); tone(m,0,1.8); input.on(m,"screen"); });
 document.getElementById("oct-down").onclick=()=>{ if(S.low>24){S.low-=12;save();buildKeys()} };
 document.getElementById("oct-up").onclick=()=>{ if(S.low<72){S.low+=12;save();buildKeys()} };
 const namesBtn=document.getElementById("names-btn"), soundBtn=document.getElementById("sound-btn");
@@ -720,32 +752,41 @@ function parseVoice(str,hand,spq){ const notes=[]; let t=0;
     if(p!=="r") p.split("+").forEach(n=>notes.push({m:pitch(n),s:t*spq,e:(t+dur)*spq,h:hand})); t+=dur; });
   return {notes,len:t}; }
 const LIB=[
- {id:"clair-de-lune",title:"Au clair de la lune",composer:"Chanson traditionnelle",level:"Débutant",bpm:90,bar:4,
-  desc:"Cinq notes à la main droite, une note tenue à la main gauche. Idéal pour essayer le mode attente.",
+ {id:"clair-de-lune",title:"Au clair de la lune",composer:"Chanson traditionnelle",bpm:90,bar:4,desc:"La mélodie tient sur cinq notes. Commence ici pour découvrir le mode attente.",
   rh:"C4:1 C4:1 C4:1 D4:1 | E4:2 D4:2 | C4:1 E4:1 D4:1 D4:1 | C4:4 | C4:1 C4:1 C4:1 D4:1 | E4:2 D4:2 | C4:1 E4:1 D4:1 D4:1 | C4:4 | D4:1 D4:1 D4:1 D4:1 | A3:2 A3:2 | D4:1 C4:1 B3:1 A3:1 | G3:4 | C4:1 C4:1 C4:1 D4:1 | E4:2 D4:2 | C4:1 E4:1 D4:1 D4:1 | C4:4",
-  lh:"C3:4 | C3:2 G2:2 | C3:2 G2:2 | C3:4 | C3:4 | C3:2 G2:2 | C3:2 G2:2 | C3:4 | G2:4 | D3:4 | G2:4 | G2:4 | C3:4 | C3:2 G2:2 | C3:2 G2:2 | C3:4"},
- {id:"ode-joie",title:"Ode à la joie",composer:"Beethoven, 9e symphonie",level:"Débutant",bpm:100,bar:4,
-  desc:"La mélodie tient dans cinq doigts, plus un Sol grave. La main gauche joue une note par mesure.",
+  levels:[
+   {n:"Facile",d:"Main gauche : une note tenue.",lh:"C3:4 | C3:2 G2:2 | C3:2 G2:2 | C3:4 | C3:4 | C3:2 G2:2 | C3:2 G2:2 | C3:4 | G2:4 | D3:4 | G2:4 | G2:4 | C3:4 | C3:2 G2:2 | C3:2 G2:2 | C3:4"},
+   {n:"Intermédiaire",d:"Main gauche : accords de trois notes.",lh:"C3+E3+G3:2 C3+E3+G3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | C3+E3+G3:2 C3+E3+G3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | G2+B2+D3:2 G2+B2+D3:2 | A2+C3+F3:2 A2+C3+F3:2 | G2+B2+D3:2 G2+B2+D3:2 | G2+B2+D3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:4"},
+   {n:"Avancé",d:"Main gauche : accords brisés en croches (basse d'Alberti).",lh:"C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | F2:.5 C3:.5 A2:.5 C3:.5 F2:.5 C3:.5 A2:.5 C3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3+E3+G3:4"}]},
+ {id:"ode-joie",title:"Ode à la joie",composer:"Beethoven, 9e symphonie",bpm:100,bar:4,desc:"La mélodie tient dans cinq doigts, plus un Sol grave.",
   rh:"E4:1 E4:1 F4:1 G4:1 | G4:1 F4:1 E4:1 D4:1 | C4:1 C4:1 D4:1 E4:1 | E4:1.5 D4:.5 D4:2 | E4:1 E4:1 F4:1 G4:1 | G4:1 F4:1 E4:1 D4:1 | C4:1 C4:1 D4:1 E4:1 | D4:1.5 C4:.5 C4:2 | D4:1 D4:1 E4:1 C4:1 | D4:1 E4:.5 F4:.5 E4:1 C4:1 | D4:1 E4:.5 F4:.5 E4:1 D4:1 | C4:1 D4:1 G3:2 | E4:1 E4:1 F4:1 G4:1 | G4:1 F4:1 E4:1 D4:1 | C4:1 C4:1 D4:1 E4:1 | D4:1.5 C4:.5 C4:2",
-  lh:"C3:4 | G2:4 | C3:4 | G2:4 | C3:4 | G2:4 | C3:4 | G2:2 C3:2 | G2:4 | C3:4 | G2:4 | C3:2 G2:2 | C3:4 | G2:4 | C3:4 | G2:2 C3:2"},
- {id:"canon",title:"Canon en ré",composer:"Pachelbel",level:"Facile",bpm:66,bar:4,
-  desc:"La même grille de 8 accords tourne en boucle sous trois mélodies. Parfait pour sentir l'harmonie.",
+  levels:[
+   {n:"Facile",d:"Main gauche : une note par mesure.",lh:"C3:4 | G2:4 | C3:4 | G2:4 | C3:4 | G2:4 | C3:4 | G2:2 C3:2 | G2:4 | C3:4 | G2:4 | C3:2 G2:2 | C3:4 | G2:4 | C3:4 | G2:2 C3:2"},
+   {n:"Intermédiaire",d:"Main gauche : accords de trois notes.",lh:"C3+E3+G3:2 C3+E3+G3:2 | G2+B2+D3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | G2+B2+D3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | G2+B2+D3:2 C3+E3+G3:2 | G2+B2+D3:2 G2+B2+D3:2 | G2+B2+D3:2 C3+E3+G3:2 | G2+B2+D3:2 C3+E3+G3:2 | C3+E3+G3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | G2+B2+D3:2 G2+B2+D3:2 | C3+E3+G3:2 C3+E3+G3:2 | G2+B2+D3:2 C3+E3+G3:2"},
+   {n:"Avancé",d:"Main gauche : accords brisés en croches.",lh:"C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 G2:.5 D3:.5 B2:.5 D3:.5 | C3:.5 G3:.5 E3:.5 G3:.5 C3:.5 G3:.5 E3:.5 G3:.5 | G2:.5 D3:.5 B2:.5 D3:.5 C3:.5 G3:.5 E3:.5 G3:.5"}]},
+ {id:"canon",title:"Canon en ré",composer:"Pachelbel",bpm:66,bar:4,desc:"La même grille de huit accords tourne sous trois mélodies.",
   rh:"F#5:2 E5:2 | D5:2 C#5:2 | B4:2 A4:2 | B4:2 C#5:2 | D5:2 C#5:2 | B4:2 A4:2 | G4:2 F#4:2 | G4:2 E4:2 | D4:1 F#4:1 A4:1 G4:1 | F#4:1 D4:1 F#4:1 E4:1 | D4:1 B3:1 D4:1 A4:1 | G4:1 B4:1 A4:1 G4:1 | F#4:4",
-  lh:"D3:2 A2:2 | B2:2 F#2:2 | G2:2 D3:2 | G2:2 A2:2 | D3:2 A2:2 | B2:2 F#2:2 | G2:2 D3:2 | G2:2 A2:2 | D3:2 A2:2 | B2:2 F#2:2 | G2:2 D3:2 | G2:2 A2:2 | D3:4"},
- {id:"gymnopedie",title:"Gymnopédie n° 1 (début)",composer:"Erik Satie",level:"Facile",bpm:72,bar:3,
-  desc:"Lent et doux. La main gauche alterne une basse et un accord, la main droite chante par-dessus.",
+  levels:[
+   {n:"Facile",d:"Main gauche : une basse par demi-mesure.",lh:"D3:2 A2:2 | B2:2 F#2:2 | G2:2 D3:2 | G2:2 A2:2 | D3:2 A2:2 | B2:2 F#2:2 | G2:2 D3:2 | G2:2 A2:2 | D3:2 A2:2 | B2:2 F#2:2 | G2:2 D3:2 | G2:2 A2:2 | D3:4"},
+   {n:"Intermédiaire",d:"Main gauche : accords de trois notes.",lh:"D3+F#3+A3:2 A2+C#3+E3:2 | B2+D3+F#3:2 F#2+A2+C#3:2 | G2+B2+D3:2 D3+F#3+A3:2 | G2+B2+D3:2 A2+C#3+E3:2 | D3+F#3+A3:2 A2+C#3+E3:2 | B2+D3+F#3:2 F#2+A2+C#3:2 | G2+B2+D3:2 D3+F#3+A3:2 | G2+B2+D3:2 A2+C#3+E3:2 | D3+F#3+A3:2 A2+C#3+E3:2 | B2+D3+F#3:2 F#2+A2+C#3:2 | G2+B2+D3:2 D3+F#3+A3:2 | G2+B2+D3:2 A2+C#3+E3:2 | D3+F#3+A3:4"},
+   {n:"Avancé",d:"Main gauche : arpèges en croches sur deux octaves.",lh:"D2:.5 A2:.5 D3:.5 F#3:.5 A1:.5 E2:.5 A2:.5 C#3:.5 | B1:.5 F#2:.5 B2:.5 D3:.5 F#1:.5 C#2:.5 F#2:.5 A2:.5 | G1:.5 D2:.5 G2:.5 B2:.5 D2:.5 A2:.5 D3:.5 F#3:.5 | G1:.5 D2:.5 G2:.5 B2:.5 A1:.5 E2:.5 A2:.5 C#3:.5 | D2:.5 A2:.5 D3:.5 F#3:.5 A1:.5 E2:.5 A2:.5 C#3:.5 | B1:.5 F#2:.5 B2:.5 D3:.5 F#1:.5 C#2:.5 F#2:.5 A2:.5 | G1:.5 D2:.5 G2:.5 B2:.5 D2:.5 A2:.5 D3:.5 F#3:.5 | G1:.5 D2:.5 G2:.5 B2:.5 A1:.5 E2:.5 A2:.5 C#3:.5 | D2:.5 A2:.5 D3:.5 F#3:.5 A1:.5 E2:.5 A2:.5 C#3:.5 | B1:.5 F#2:.5 B2:.5 D3:.5 F#1:.5 C#2:.5 F#2:.5 A2:.5 | G1:.5 D2:.5 G2:.5 B2:.5 D2:.5 A2:.5 D3:.5 F#3:.5 | G1:.5 D2:.5 G2:.5 B2:.5 A1:.5 E2:.5 A2:.5 C#3:.5 | D2+A2+D3+F#3:4"}]},
+ {id:"gymnopedie",title:"Gymnopédie n° 1 (début)",composer:"Erik Satie",bpm:72,bar:3,desc:"Lent et doux. La main droite chante au-dessus d'un balancement de la main gauche.",
   rh:"r:3 | r:3 | r:3 | r:3 | r:1 F#5:1 A5:1 | G5:1 F#5:1 C#5:1 | B4:1 C#5:1 D5:1 | A4:3 | F#4:6 | r:3 | r:3",
-  lh:"G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2"},
- {id:"lettre-elise",title:"Lettre à Élise (thème)",composer:"Beethoven",level:"Intermédiaire",bpm:80,bar:1.5,pickup:.5,
-  desc:"Le thème célèbre en la mineur. Les deux mains se passent le relais : bon exercice de coordination.",
+  levels:[
+   {n:"Facile",d:"Main gauche : la basse seule.",lh:"G2:3 | D2:3 | G2:3 | D2:3 | G2:3 | D2:3 | G2:3 | D2:3 | G2:3 | D2:3 | G2:3 | D2:3"},
+   {n:"Comme l'original",d:"Main gauche : basse puis accord, comme Satie l'a écrit.",lh:"G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2 | G2:1 B3+D4+F#4:2 | D2:1 A3+C#4+F#4:2"}]},
+ {id:"lettre-elise",title:"Lettre à Élise (thème)",composer:"Beethoven",bpm:80,bar:1.5,pickup:0.5,desc:"Le thème célèbre en la mineur. Les deux mains se passent le relais.",
   rh:"E5:.25 D#5:.25 | E5:.25 D#5:.25 E5:.25 B4:.25 D5:.25 C5:.25 | A4:.5 r:.25 C4:.25 E4:.25 A4:.25 | B4:.5 r:.25 E4:.25 G#4:.25 B4:.25 | C5:.5 r:.25 E4:.25 E5:.25 D#5:.25 | E5:.25 D#5:.25 E5:.25 B4:.25 D5:.25 C5:.25 | A4:.5 r:.25 C4:.25 E4:.25 A4:.25 | B4:.5 r:.25 E4:.25 C5:.25 B4:.25 | A4:1.5",
-  lh:"r:.5 | r:1.5 | A2:.25 E3:.25 A3:.25 r:.75 | E2:.25 E3:.25 G#3:.25 r:.75 | A2:.25 E3:.25 A3:.25 r:.75 | r:1.5 | A2:.25 E3:.25 A3:.25 r:.75 | E2:.25 E3:.25 G#3:.25 r:.75 | A2:.25 E3:.25 A3:.25 r:.75"}
+  levels:[
+   {n:"Facile",d:"Main gauche : une basse tenue par mesure.",lh:"r:.5 | r:1.5 | A2:1.5 | E2:1.5 | A2:1.5 | r:1.5 | A2:1.5 | E2:1.5 | A2:1.5"},
+   {n:"Comme l'original",d:"Main gauche : les arpèges écrits par Beethoven.",lh:"r:.5 | r:1.5 | A2:.25 E3:.25 A3:.25 r:.75 | E2:.25 E3:.25 G#3:.25 r:.75 | A2:.25 E3:.25 A3:.25 r:.75 | r:1.5 | A2:.25 E3:.25 A3:.25 r:.75 | E2:.25 E3:.25 G#3:.25 r:.75 | A2:.25 E3:.25 A3:.25 r:.75"}]}
 ];
-function buildSong(def){
-  const spq=60/def.bpm; const r=parseVoice(def.rh,"R",spq), l=parseVoice(def.lh,"L",spq);
+function buildSong(def,li){
+  li=Math.max(0,Math.min(def.levels.length-1,li||0)); const lv=def.levels[li];
+  const spq=60/def.bpm; const r=parseVoice(def.rh,"R",spq), l=parseVoice(lv.lh,"L",spq);
   const len=Math.max(r.len,l.len); const bars=[]; for(let q=def.pickup||0;q<len-1e-6;q+=def.bar) bars.push(q*spq);
   const notes=r.notes.concat(l.notes).sort((a,b)=>a.s-b.s||a.m-b.m);
-  return {id:def.id,title:def.title,sub:def.composer,notes,bars,duration:len*spq,builtin:true};
+  return {id:def.id+"-n"+(li+1),pid:def.id,level:li,levelName:lv.n,title:def.title,sub:def.composer+" · Niveau "+(li+1)+" : "+lv.n,notes,bars,duration:len*spq,builtin:true};
 }
 
 /* ---------- Lecture d'un fichier MIDI ---------- */
@@ -816,12 +857,13 @@ function library(){
   const imps=getImports(); const best=store.get("best",{});
   let h=tabsHTML("morceaux")+'<section class="hero"><h1>Joue des morceaux, note après note.</h1><p>Les notes tombent vers le clavier. En mode attente, le morceau s\'arrête jusqu\'à ce que tu joues la bonne note sur ton piano.</p></section>';
   h+='<section class="chapter"><h2>Bibliothèque · domaine public</h2>';
-  LIB.forEach(d=>{ const b=best[d.id]; h+='<a class="song-row" href="#jouer-'+d.id+'"><span class="lvl lvl-'+(d.level==="Débutant"?1:d.level==="Facile"?2:3)+'">'+d.level+'</span><span class="song-txt"><span class="t">'+d.title+'</span><span class="s">'+d.composer+(b?' · déjà joué':'')+'</span><span class="d">'+d.desc+'</span></span></a>'; });
+  LIB.forEach(d=>{ h+='<div class="song-row"><span class="song-txt"><span class="t">'+d.title+'</span><span class="s">'+d.composer+'</span><span class="d">'+d.desc+'</span><span class="lv-list" style="--n:'+d.levels.length+'">'+
+    d.levels.map((lv,i)=>'<a class="lv-chip lv-'+(i+1)+'" href="#jouer-'+d.id+'-n'+(i+1)+'"><b>Niveau '+(i+1)+'</b><span>'+lv.n+(best[d.id+"-n"+(i+1)]?' · joué ✓':'')+'</span><small>'+lv.d+'</small></a>').join("")+'</span></span></div>'; });
   h+='</section><section class="chapter"><h2>Mes morceaux importés</h2>';
   if(!imps.length) h+='<p class="empty">Aucun fichier pour l\'instant. Importe un fichier MIDI (.mid) depuis ton téléphone : un morceau acheté, ou exporté depuis une partition.</p>';
   imps.forEach(it=>{ h+='<div class="imp-row"><a class="song-row" href="#jouer-'+it.id+'"><span class="lvl">MIDI</span><span class="song-txt"><span class="t">'+esc(it.name)+'</span><span class="s">Importé le '+new Date(it.at).toLocaleDateString("fr-FR")+'</span></span></a><button class="mini del" data-del="'+it.id+'" aria-label="Supprimer '+esc(it.name)+'">Supprimer</button></div>'; });
   h+='<label class="btn primary file-btn" for="midi-file">Importer un fichier MIDI</label><input type="file" id="midi-file" accept=".mid,.midi,audio/midi,audio/x-midi" hidden><p class="feedback" id="imp-msg"></p>';
-  h+='<p class="note-box">Où trouver des fichiers MIDI : MuseScore.com permet de télécharger une partition au format MIDI (souvent avec abonnement), et le logiciel gratuit MuseScore exporte en MIDI n\'importe quelle partition ouverte. Les fichiers trouvés au hasard sur internet sont de qualité très variable.</p></section>';
+  h+='<p class="note-box">Où trouver des fichiers MIDI : MuseScore.com permet de télécharger une partition au format MIDI (souvent avec abonnement), et le logiciel gratuit MuseScore exporte en MIDI n\'importe quelle partition ouverte. Les fichiers trouvés au hasard sur internet sont de qualité très variable.</p><p class="note-box">Son du piano de l\'appli : échantillons de vrai piano du projet tonejs-instruments (licence MIT).</p></section>';
   view.innerHTML=h;
   const fi=document.getElementById("midi-file"), msg=document.getElementById("imp-msg");
   fi.onchange=()=>{ const f=fi.files&&fi.files[0]; if(!f)return; if(f.size>1.5e6){ msg.className="feedback bad"; msg.textContent="Fichier trop lourd (plus de 1,5 Mo) : ce n'est sans doute pas un simple morceau de piano."; return; }
@@ -846,8 +888,8 @@ function releaseWake(){ try{ if(wake) wake.release(); }catch(e){} wake=null; }
 const outNotes=new Map();
 function useCasio(){ return !!(midiOut&&S.casioSound); }
 function playOut(m,dur,vel){
-  if(useCasio()){ try{ midiOut.send([0x90,m,vel||72]); clearTimeout(outNotes.get(m)); outNotes.set(m,setTimeout(()=>{ try{midiOut.send([0x80,m,0])}catch(e){} outNotes.delete(m); },Math.max(80,dur*1000-15))); }catch(e){ tone(m,0,Math.min(dur+.3,3),.7); } }
-  else tone(m,0,Math.min(dur+.4,3),.7);
+  if(useCasio()){ try{ midiOut.send([0x90,m,vel||72]); clearTimeout(outNotes.get(m)); outNotes.set(m,setTimeout(()=>{ try{midiOut.send([0x80,m,0])}catch(e){} outNotes.delete(m); },Math.max(80,dur*1000-15))); }catch(e){ tone(m,0,Math.min(dur,4),.7); } }
+  else tone(m,0,Math.min(dur,4),.7);
 }
 function allOff(){ outNotes.forEach((t,m)=>{ clearTimeout(t); try{midiOut&&midiOut.send([0x80,m,0])}catch(e){} }); outNotes.clear(); try{ midiOut&&midiOut.send([0xB0,123,0]); }catch(e){} }
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
@@ -855,8 +897,8 @@ function cssVar(n){ return getComputedStyle(document.documentElement).getPropert
 function player(id){
   stopPlayer(); setHints([]); showDock(false); document.body.classList.add("playing");
   let song=null, err="";
-  const def=LIB.find(d=>d.id===id);
-  try{ song=def?buildSong(def):loadImport(id); }catch(e){ err=e.message; }
+  const mm=id.match(/^(.*)-n(\d)$/); const def=LIB.find(d=>d.id===(mm?mm[1]:id)); const li=mm?(+mm[2]-1):0;
+  try{ song=def?buildSong(def,li):loadImport(id); }catch(e){ err=e.message; }
   if(!song){ view.innerHTML=tabsHTML("morceaux")+'<p class="feedback bad">'+esc(err||"Ce morceau n'existe plus sur cet appareil.")+'</p><a class="btn" href="#morceaux">← Morceaux</a>'; document.body.classList.remove("playing"); return; }
   const prefs=store.get("player",{mode:"attente",hands:"deux",speed:.8});
   P={song,alive:true,t:-2,prevT:-2,playing:false,mode:prefs.mode,hands:prefs.hands,speed:prefs.speed,loop:{on:false,a:1,b:Math.min(4,song.bars.length)},
@@ -871,6 +913,7 @@ function player(id){
    '<label for="pl-speed">Vitesse <b id="pl-speed-v"></b></label><input type="range" id="pl-speed" min="30" max="120" step="5">'+
    '<label class="chk" for="pl-loop"><input type="checkbox" id="pl-loop"> Répéter les mesures</label><span class="loop-in"><input type="number" id="pl-la" min="1" max="'+nb+'" inputmode="numeric"> à <input type="number" id="pl-lb" min="1" max="'+nb+'" inputmode="numeric"></span>'+
    '<label class="chk" for="pl-casio"><input type="checkbox" id="pl-casio"> Faire jouer l\'accompagnement par le Casio</label><span class="hint-txt" id="pl-casio-t"></span>'+
+   (song.builtin&&def.levels.length>1?'<span class="lbl-niv">Niveau</span><div class="seg lv-seg" role="group" aria-label="Niveau">'+def.levels.map((lv,i)=>'<button data-lv="'+(i+1)+'" aria-pressed="'+(i===song.level)+'" title="'+esc(lv.n)+'">'+(i+1)+'</button>').join('')+'</div>':'')+
    (song.builtin?'':'<label for="pl-split">Mains</label><select id="pl-split"><option value="pistes">Selon les pistes du fichier</option><option value="split">Séparer au Do central</option></select>')+
    '</div></details></div>'+
 '<div class="pl-status"><span id="pl-msg">Touche « Lancer ». Les notes à jouer arrivent par le haut.</span><span class="pl-pos"><button class="mini" id="pl-prev" aria-label="Mesure précédente">◀</button><span id="pl-bar">Mesure 1 / '+nb+'</span><button class="mini" id="pl-next" aria-label="Mesure suivante">▶</button></span></div>'+
@@ -933,7 +976,7 @@ function player(id){
   cv.addEventListener("pointerdown",e=>{ const r=cv.getBoundingClientRect(); const x=e.clientX-r.left, y=e.clientY-r.top; if(y<fallH)return; e.preventDefault();
     let hit=null; for(let m=lo;m<=hi;m++){ if(!isBlack(m))continue; const k=keyRect(m); if(x>=k.x&&x<k.x+k.w&&y<fallH+kbH*.62){hit=m;break} }
     if(hit===null){ const i=Math.floor(x/ww); hit=whites[Math.max(0,Math.min(whites.length-1,i))]; }
-    tone(hit); input.on(hit,"screen"); });
+    tone(hit,0,1.8); input.on(hit,"screen"); });
 
   // Boucle d'animation
   function frame(now){
@@ -1009,6 +1052,7 @@ function player(id){
   const jump=dir=>{ setPlaying(false); const cur=barIndex(P.t); const target=Math.max(1,Math.min(nb,cur+dir)); buildGroups(); seek(Math.max(-2,song.bars[target-1]-.8)); msg("Mesure "+target+"."); draw(); };
   document.getElementById("pl-prev").onclick=()=>jump(-1); document.getElementById("pl-next").onclick=()=>jump(1);
   P.syncUI=syncUI;
+  view.querySelectorAll("[data-lv]").forEach(b=>b.onclick=()=>{ location.hash="jouer-"+song.pid+"-n"+b.dataset.lv; });
   const plMidi=document.getElementById("pl-midi"); plMidi.onclick=()=>pill.onclick(); P.midiUI=()=>{ plMidi.className="pill pl-midi"+(midiState==="on"?" on":["unsupported","blocked","none"].includes(midiState)?" warn":""); plMidi.lastElementChild.textContent=midiState==="on"?"Piano":"Brancher le piano"; }; P.midiUI();
   const fsb=document.getElementById("pl-fs"); const fsEl=document.documentElement;
   if(document.fullscreenEnabled&&fsEl.requestFullscreen){ fsb.hidden=false;
