@@ -346,12 +346,12 @@ function setMidi(st,name){ midiState=st; midiName=name||""; pill.classList.toggl
 function onMidi(ev){ const d=ev.data; if(!d||d.length<2)return; const s=d[0]&0xf0;
   if(s===0x90&&d[2]>0) input.on(d[1],"midi"); else if(s===0x80||(s===0x90&&d[2]===0)) input.off(d[1]);
   else if(s===0xB0&&d[1]===64){ input.pedal=d[2]>=64; if(input.pedalListener)input.pedalListener(input.pedal); } }
-async function connectMidi(){
-  if(!navigator.requestMIDIAccess){ setMidi("unsupported"); return; }
+async function connectMidi(quiet){
+  if(!navigator.requestMIDIAccess){ setMidi(quiet?"idle":"unsupported"); return; }
   try{ const acc=await navigator.requestMIDIAccess({sysex:false});
-    const bind=()=>{ const names=[]; acc.inputs.forEach(i=>{i.onmidimessage=onMidi; names.push(i.name||"Clavier MIDI")}); midiOut=null; acc.outputs.forEach(o=>{ if(!midiOut&&o.state!=="disconnected") midiOut=o; }); setMidi(names.length?"on":"none",names.join(", ")); if(P&&P.syncUI)P.syncUI(); };
+    const bind=()=>{ const names=[]; acc.inputs.forEach(i=>{i.onmidimessage=onMidi; names.push(i.name||"Clavier MIDI")}); midiOut=null; acc.outputs.forEach(o=>{ if(!midiOut&&o.state!=="disconnected") midiOut=o; }); setMidi(names.length?"on":"none",names.join(", ")); if(names.length) store.set("midiAuto",true); if(P&&P.syncUI)P.syncUI(); };
     bind(); acc.onstatechange=()=>{bind(); if(sheetOpen==="midi")midiSheet()};
-  }catch(e){ setMidi("blocked"); }
+  }catch(e){ setMidi(quiet?"idle":"blocked"); }
 }
 pill.onclick=async()=>{ if(midiState==="idle"||midiState==="none") await connectMidi(); midiSheet(); };
 
@@ -901,7 +901,7 @@ function player(id){
   function buildGroups(){ const req=song.notes.filter(n=>needHand(n.h)); const gs=[];
     req.forEach(n=>{ const last=gs[gs.length-1]; if(last&&n.s-last.s<.04) last.need.add(n.m); else gs.push({s:n.s,need:new Set([n.m]),got:new Set()}); });
     P.groups=gs; }
-  function seek(t){ P.t=t; P.prevT=t; allOff(); P.lit.clear();
+  function seek(t){ P.t=t; P.prevT=t; P.waitTxt=""; allOff(); P.lit.clear();
     P.gi=P.groups.findIndex(gr=>gr.s>=t-.001); if(P.gi<0)P.gi=P.groups.length; for(let i=P.gi;i<P.groups.length;i++) P.groups[i].got.clear();
     P.ai=song.notes.findIndex(n=>n.s>t); if(P.ai<0)P.ai=song.notes.length; P.finished=false; }
   function barIndex(t){ let i=0; while(i<song.bars.length&&song.bars[i]<=t+1e-6)i++; return Math.max(1,i); }
@@ -940,7 +940,7 @@ function player(id){
     if(!P||!P.alive)return; P.raf=requestAnimationFrame(frame);
     if(P.playing){
       const dt=Math.min(.1,(now-P.last)/1000); P.last=now; let nt=P.t+dt*P.speed;
-      if(P.mode==="attente"){ const gr=P.groups[P.gi]; if(gr&&nt>=gr.s){ nt=gr.s; if(!P.waitMsg){ P.waitMsg=true; msg("À toi : "+[...gr.need].filter(x=>!gr.got.has(x)).sort((a,b)=>a-b).map(x=>nameOf(x)+oct(x)).join(" + ")); } } else if(P.waitMsg){ P.waitMsg=false; msg(""); } }
+      if(P.mode==="attente"){ const gr=P.groups[P.gi]; if(gr&&nt>=gr.s){ nt=gr.s; const txt="À toi : "+[...gr.need].filter(x=>!gr.got.has(x)).sort((a,b)=>a-b).map(x=>nameOf(x)+oct(x)).join(" + ")+(midiState==="on"?"":" · piano non branché : touche « Brancher le piano » ou joue sur le clavier à l'écran"); if(P.waitTxt!==txt){ P.waitTxt=txt; msg(txt,midiState==="on"?"":"bad"); } } else if(P.waitTxt){ P.waitTxt=""; msg(""); } }
       P.prevT=P.t; P.t=nt;
       while(P.ai<song.notes.length&&song.notes[P.ai].s<=P.t){ const n=song.notes[P.ai]; if(n.s>P.prevT-1e-6&&!needHand(n.h)){ playOut(n.m,(n.e-n.s)/P.speed); } P.ai++; }
       if(P.loop.on){ const endT=P.loop.b<song.bars.length?song.bars[P.loop.b]:song.duration; if(P.t>=endT){ buildGroups(); seek(Math.max(-2,song.bars[P.loop.a-1]-1.2)); msg("On reprend la boucle."); } }
@@ -1009,7 +1009,7 @@ function player(id){
   const jump=dir=>{ setPlaying(false); const cur=barIndex(P.t); const target=Math.max(1,Math.min(nb,cur+dir)); buildGroups(); seek(Math.max(-2,song.bars[target-1]-.8)); msg("Mesure "+target+"."); draw(); };
   document.getElementById("pl-prev").onclick=()=>jump(-1); document.getElementById("pl-next").onclick=()=>jump(1);
   P.syncUI=syncUI;
-  const plMidi=document.getElementById("pl-midi"); plMidi.onclick=()=>pill.onclick(); P.midiUI=()=>{ plMidi.className="pill pl-midi"+(midiState==="on"?" on":["unsupported","blocked","none"].includes(midiState)?" warn":""); }; P.midiUI();
+  const plMidi=document.getElementById("pl-midi"); plMidi.onclick=()=>pill.onclick(); P.midiUI=()=>{ plMidi.className="pill pl-midi"+(midiState==="on"?" on":["unsupported","blocked","none"].includes(midiState)?" warn":""); plMidi.lastElementChild.textContent=midiState==="on"?"Piano":"Brancher le piano"; }; P.midiUI();
   const fsb=document.getElementById("pl-fs"); const fsEl=document.documentElement;
   if(document.fullscreenEnabled&&fsEl.requestFullscreen){ fsb.hidden=false;
     fsb.onclick=async()=>{ try{ if(document.fullscreenElement){ await document.exitFullscreen(); } else { await fsEl.requestFullscreen({navigationUI:"hide"}); try{ await screen.orientation.lock("landscape"); }catch(e){} } }catch(e){ fsb.hidden=true; } }; }
@@ -1027,6 +1027,7 @@ window.addEventListener("hashchange",route);
 document.getElementById("home-link").onclick=()=>{location.hash="accueil"};
 window.addEventListener("resize",()=>{ if(!dock.hidden) document.documentElement.style.setProperty("--dock-h",dock.offsetHeight+"px") });
 route();
+if(store.get("midiAuto",false)) connectMidi(true);
 })();
 </script>
 
