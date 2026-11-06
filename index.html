@@ -247,6 +247,34 @@ body.playing main{padding-block:12px 12px}
 .lib-tools{display:flex;flex-direction:column;gap:8px;margin:8px 0 4px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 57px);z-index:5;background:var(--bg);padding-block:8px}
 .search{font-size:16px}
 .cat-filter button.todo{color:var(--bad);border-color:var(--bad)}
+.cat-filter button.fav{color:var(--felt);border-color:var(--felt)}
+.cat-filter button.fav[aria-pressed="true"]{background:var(--felt);color:#fff;border-color:var(--felt)}
+.nudge.tidy{background:var(--felt-soft);color:var(--ink)}
+.nudge.tidy .mini{border-color:var(--felt);color:var(--felt)}
+.srow{display:flex;align-items:center;gap:4px;border-bottom:1px solid var(--line);min-height:52px}
+.srow-main{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 0;text-decoration:none;color:inherit;cursor:pointer;list-style:none}
+.srow-main::-webkit-details-marker{display:none}
+.srow-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.srow-t b{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.srow-t span{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.srow .dpill{min-width:0}
+.star{flex:none;width:40px;height:40px;border:0;background:none;font-size:22px;line-height:1;color:var(--line);cursor:pointer}
+.star[aria-pressed="true"]{color:var(--felt)}
+.sgroup{border-bottom:1px solid var(--line)}
+.sgroup>.srow{border-bottom:0;list-style:none;cursor:pointer}
+.sgroup>summary::-webkit-details-marker{display:none}
+.sgroup .chev{flex:none;font-size:12px;color:var(--muted);transition:transform .15s}
+.sgroup[open] .chev{transform:rotate(90deg)}
+.sgroup .vers{padding:0 0 8px 14px;border-left:2px solid var(--felt-soft);margin-left:4px}
+.sgroup .ver-row:first-child{border-top:0}
+.tidy-g{border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0}
+.tidy-g label.chk{display:flex;gap:8px;align-items:center;font-weight:600}
+.tidy-g input[type=checkbox],.tidy-all input[type=checkbox]{width:18px;height:18px;accent-color:var(--felt);flex:none}
+.tidy-g ul{margin:6px 0 0;padding-left:26px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.tidy-list li{overflow-wrap:anywhere}
+.tidy-g li b{color:var(--ink);font-weight:600}
+.tidy-all{display:flex;gap:8px;align-items:center;font-weight:600;margin:10px 0 4px}
+.tidy-list{font-size:13px;color:var(--muted);max-height:180px;overflow:auto;margin:4px 0 8px;padding-left:18px}
 .chapter .cat-h{display:flex;align-items:baseline;gap:10px;font-family:var(--f-display);font-weight:400;font-size:26px;letter-spacing:0;text-transform:none;color:var(--ink);margin:26px 0 10px}
 .chapter .cat-h.todo{color:var(--bad)}
 .cat-h small{font-family:var(--f-body);font-size:13px;color:var(--muted)}
@@ -946,13 +974,94 @@ function splitTitle(name,cat){
     if(NOISE.includes(n)||cw.includes(n)||n==="by") return;
     keep.push(w); });
   let title=keep.join(" ").replace(/^[\s–\-:|,.]+|[\s–\-:|,.]+$/g,"").replace(/\s[–\-]\s[–\-]\s/g," – ").replace(/\s{2,}/g," ").trim();
-  if(title.length<2) title=name;
+  title=cleanTitle(title); if(title.length<2) title=name;
   const FRV={easy:"Facile",facile:"Facile",beginner:"Débutant",debutant:"Débutant",intermediate:"Intermédiaire",intermediaire:"Intermédiaire",advanced:"Avancé",avance:"Avancé",hard:"Difficile",difficile:"Difficile",expert:"Expert",simple:"Simple",simplified:"Simplifiée",simplifie:"Simplifiée",full:"Complète",short:"Courte"};
   const vb=verBits.map(w=>FRV[normTxt(w).trim()]||w);
   const hint=verBits.map(w=>normTxt(w).trim()).reduce((h,n)=>["easy","facile","beginner","debutant","simple","simplified","simplifie"].includes(n)?"1":["intermediate","intermediaire"].includes(n)?"2":["advanced","avance","hard","difficile","expert"].includes(n)?"3":h,"auto");
   return {title,ver:vb.join(" "),hint};
 }
 const songKey=t=>normTxt(t).replace(/ /g,"");
+
+/* ---------- Nettoyage des titres et regroupement des versions ---------- */
+// Accents perdus par MuseScore dans les noms de fichiers
+const ACCENT_FIX=[[/\bpokmon\b/gi,"Pokémon"],[/\bvgel\b/gi,"Vögel"],[/\bkfig\b/gi,"Käfig"],[/\bfr elise\b/gi,"Für Elise"],[/\bshippden\b/gi,"Shippuden"]];
+const EDGE_WORDS=["for","from","by","de","pour","ost","sheets","piano","solo","full"];
+function cleanTitle(t){
+  let s=" "+String(t||"").replace(/[_]+/g," ")+" ";
+  s=s.replace(/[぀-ヿ㐀-鿿＀-￯]+/g," ");          // caractères japonais (ex. ピアノ = piano)
+  s=s.replace(/(^|[\s\-–(])\d{6,}(?=$|[\s\-–)])/g," ");                       // numéros MuseScore (1793641368588)
+  s=s.replace(/([A-Za-z])-(s|re|t|ll|ve|d|m)(?=\s|$|[-–])/g,"$1'$2");          // Tapion-s → Tapion's
+  ACCENT_FIX.forEach(([re,v])=>{ s=s.replace(re,v); });
+  s=s.replace(/\s*-+\s*$/,"").replace(/\s{2,}/g," ").trim();
+  let w=s.split(" ");
+  const edge=x=>EDGE_WORDS.includes(normTxt(x).trim())||/^[–\-:|,.]+$/.test(x);
+  while(w.length>1&&edge(w[w.length-1])) w.pop();
+  while(w.length>1&&edge(w[0])) w.shift();
+  s=w.join(" ").replace(/^[\s–\-:|,.]+|[\s–\-:|,.]+$/g,"").trim();
+  return s.length>=2?s:String(t||"").trim();
+}
+// Retire le nom de la catégorie collé au début (« BleachWill of the Heart »)
+function stripCatPrefix(title,cat){ const t=title.trim();
+  for(const cw of catWords(cat)){ const re=new RegExp("^"+cw.replace(/ /g,"\\s*")+"(?:\\s*[–\\-:|]\\s*|\\s+|(?=[A-Z]))","i"); const m=t.match(re);
+    if(m&&t.length-m[0].length>=2) return t.slice(m[0].length).trim(); }
+  return t; }
+const flat=t=>normTxt(t).replace(/ /g,"");
+// Les mots du titre qui restent après le titre commun : ils deviennent le nom de la version
+function residue(title,groupTitle){ const target=flat(groupTitle); const toks=title.split(/\s+/); let acc="", i=0;
+  while(i<toks.length&&acc.length<target.length){ acc+=flat(toks[i]); i++; }
+  return acc===target?toks.slice(i).join(" "):""; }
+function cleanResidue(r,cat){ const cw=catWords(cat);
+  const FRV={easy:"Facile",facile:"Facile",beginner:"Débutant",intermediate:"Intermédiaire",advanced:"Avancé",hard:"Difficile",expert:"Expert",simplified:"Simplifiée",full:"Complète",short:"Courte"};
+  const DROP=["naruto","shippuden","piano","solo","sheets","ost"];
+  let toks=r.split(/\s+/).filter(x=>normTxt(x).trim());
+  toks=toks.filter((x,i)=>!(normTxt(x).trim()==="from"&&toks[i+1]&&(cw.includes(normTxt(toks[i+1]).trim())||DROP.includes(normTxt(toks[i+1]).trim())))); // « from Naruto »
+  let w=toks.filter(x=>{ const n=normTxt(x).trim(); return !cw.includes(n)&&!DROP.includes(n); }).map(x=>FRV[normTxt(x).trim()]||x);
+  const edge=x=>["the","of","and","by","from","for"].includes(normTxt(x).trim());
+  while(w.length&&edge(w[0])) w.shift(); while(w.length&&edge(w[w.length-1])) w.pop();
+  if(w.length===1&&w[0].length<=1) w=[];
+  return w.join(" ").replace(/^[\s–\-:|,.]+|[\s–\-:|,.]+$/g,"").replace(/\s{2,}/g," ").trim(); }
+function sameSong(a,b){ // a = titre le plus court
+  const fa=flat(a), fb=flat(b); if(!fa||!fb) return false;
+  if(fa===fb) return true;
+  const wa=normTxt(a).trim().split(" "), wb=normTxt(b).trim().split(" ");
+  if(fb.startsWith(fa)&&(wa.length>=2||fa.length>=6)&&residue(b,a)!=="") return true;
+  let k=0; while(k<wa.length&&k<wb.length&&wa[k]===wb[k]) k++;
+  return k>=3; }
+function proposeTidy(list){
+  const clean={}; list.forEach(it=>{ clean[it.id]=stripCatPrefix(cleanTitle(it.title||it.name),it.cat); });
+  const renames=list.filter(it=>clean[it.id]!==(it.title||it.name)).map(it=>({id:it.id,from:it.title||it.name,to:clean[it.id]}));
+  const groups=[]; const byCat={}; list.forEach(it=>(byCat[it.cat]=byCat[it.cat]||[]).push(it));
+  Object.keys(byCat).forEach(cat=>{ const items=byCat[cat].slice().sort((a,b)=>clean[a.id].length-clean[b.id].length);
+    const par={}; const find=x=>par[x]===x?x:(par[x]=find(par[x])); items.forEach(it=>par[it.id]=it.id);
+    for(let i=0;i<items.length;i++) for(let j=i+1;j<items.length;j++) if(sameSong(clean[items[i].id],clean[items[j].id])) par[find(items[j].id)]=find(items[i].id);
+    const sets={}; items.forEach(it=>(sets[find(it.id)]=sets[find(it.id)]||[]).push(it));
+    Object.values(sets).forEach(m=>{ if(m.length<2) return;
+      const ts=m.map(it=>clean[it.id]); let title=ts[0];
+      if(!ts.every(t=>flat(t).startsWith(flat(title)))){ // préfixe commun de mots
+        const ws=ts.map(t=>t.split(/\s+/)); let k=0; while(ws.every(w=>w[k]&&normTxt(w[k])===normTxt(ws[0][k]))) k++; title=ws[0].slice(0,Math.max(1,k)).join(" "); }
+      // Choisit la meilleure écriture du titre (majuscules, apostrophes) parmi les fichiers du groupe
+      const cand=ts.map(t=>{ const toks=t.split(/\s+/), rest=residue(t,title); return rest?toks.slice(0,toks.length-rest.split(/\s+/).length).join(" "):(flat(t)===flat(title)?t:""); }).filter(Boolean);
+      const score=t=>(t.match(/(^|\s)[A-Z]/g)||[]).length*2+(t.match(/\s/g)||[]).length-(t===t.toUpperCase()?5:0);
+      if(cand.length) title=cand.sort((x,y)=>score(y)-score(x))[0];
+      // Déjà regroupé ? (même titre et versions déjà nommées)
+      if(m.every(it=>(it.title||"")===title)) return;
+      groups.push({cat,title,items:m.map(it=>{ const r=cleanResidue(residue(clean[it.id],title),cat);
+        const parts=[]; (it.ver?[it.ver]:[]).concat(r?[r]:[]).forEach(p=>{ if(p&&!parts.some(q=>normTxt(q).includes(normTxt(p).trim()))) parts.push(p); });
+        return {id:it.id,from:it.title||it.name,ver:parts.join(" · ").slice(0,40)}; })}); }); });
+  groups.sort((a,b)=>a.title.localeCompare(b.title,"fr"));
+  return {renames,groups};
+}
+function applyTidy(p,useRenames,groupIdx,titles){
+  const list=getImports(); const undo={}; const keep=it=>{ if(!undo[it.id]) undo[it.id]={title:it.title,ver:it.ver}; };
+  if(useRenames) p.renames.forEach(r=>{ const it=list.find(x=>x.id===r.id); if(it){ keep(it); it.title=r.to; } });
+  groupIdx.forEach(gi=>{ const g=p.groups[gi]; const t=(titles[gi]||g.title).trim()||g.title;
+    g.items.forEach(x=>{ const it=list.find(y=>y.id===x.id); if(it){ keep(it); it.title=t; it.ver=x.ver; } }); });
+  if(!Object.keys(undo).length) return 0;
+  store.set("undoTidy",{at:Date.now(),items:undo}); saveImports(list); return Object.keys(undo).length;
+}
+function undoTidy(){ const u=store.get("undoTidy",null); if(!u) return 0; const list=getImports(); let n=0;
+  list.forEach(it=>{ const o=u.items[it.id]; if(o){ it.title=o.title; it.ver=o.ver; n++; } });
+  saveImports(list); localStorage.removeItem(PFX+"undoTidy"); return n; }
 function midiStats(s){
   const notes=s.notes; let groups=0, last=-9; notes.forEach(n=>{ if(n.s-last>=.04){ groups++; last=n.s; } });
   const dur=Math.max(1,s.duration); const nps=notes.length/dur; const poly=notes.length/Math.max(1,groups);
@@ -1045,8 +1154,10 @@ function library(flash){
   const imps=enrich(getImports()); const best=store.get("best",{});
   let h=tabsHTML("morceaux");
   h+='<section class="chapter mine" id="mine"><div class="mine-head"><div><h1 class="lib-h">Mes morceaux</h1><p class="lib-sub">'+(imps.length?imps.length+' fichier'+(imps.length>1?'s':'')+' importé'+(imps.length>1?'s':''):'Tes fichiers MIDI, rangés par catégorie et par titre.')+'</p></div>'+
-     '<span class="mine-act"><button class="btn" id="bk-open">Sauvegarde</button><label class="btn primary file-btn" for="midi-file">+ Importer</label><input type="file" id="midi-file" accept=".mid,.midi,audio/midi,audio/x-midi" multiple hidden></span></div>';
+     '<span class="mine-act">'+(imps.length?'<button class="btn" id="tidy-open">Ranger</button>':'')+'<button class="btn" id="bk-open">Sauvegarde</button><label class="btn primary file-btn" for="midi-file">+ Importer</label><input type="file" id="midi-file" accept=".mid,.midi,audio/midi,audio/x-midi" multiple hidden></span></div>';
   h+='<p class="nudge" id="bk-nudge"'+(needsBackup()?'':' hidden')+'>Des morceaux ne sont pas encore sauvegardés. <button class="mini" id="bk-nudge-btn">Sauvegarder maintenant</button></p>';
+  const tp=imps.length?proposeTidy(imps):{renames:[],groups:[]};
+  if(tp.renames.length||tp.groups.length) h+='<p class="nudge tidy">'+(tp.groups.length?tp.groups.length+' morceau'+(tp.groups.length>1?'x':'')+' en plusieurs fichiers à regrouper':'')+(tp.groups.length&&tp.renames.length?', ':'')+(tp.renames.length?tp.renames.length+' titre'+(tp.renames.length>1?'s':'')+' à nettoyer':'')+'. <button class="mini" id="tidy-nudge">Voir</button></p>';
   h+='<div class="feedback" id="imp-msg" aria-live="polite"></div>';
   if(!imps.length) h+='<div class="empty-card"><p><b>Aucun morceau importé.</b></p><ol><li>Télécharge des fichiers .mid (MuseScore, Mutopia…).</li><li>Touche « + Importer » et sélectionne-les tous d\'un coup : appui long sur le premier, puis touche les autres.</li><li>Ils sont rangés automatiquement par catégorie et par titre.</li></ol></div>';
   else h+='<div class="lib-tools"><input type="search" class="txt search" id="lib-q" placeholder="Rechercher un titre…" aria-label="Rechercher un morceau" value="'+esc(store.get("libQ",""))+'"><div class="cat-filter" id="cat-filter" role="group" aria-label="Filtrer par catégorie"></div></div><div id="mine-list"></div>'+
@@ -1060,7 +1171,8 @@ function library(flash){
   view.innerHTML=h;
   const msg=document.getElementById("imp-msg");
   if(flash){ msg.className="feedback "+(flash.bad?"bad":"ok"); msg.innerHTML=flash.html; }
-  document.getElementById("bk-open").onclick=()=>backupSheet(); const nb=document.getElementById("bk-nudge-btn"); if(nb) nb.onclick=()=>backupSheet();
+  document.getElementById("bk-open").onclick=()=>backupSheet();
+  ["tidy-open","tidy-nudge"].forEach(x=>{ const b=document.getElementById(x); if(b) b.onclick=()=>tidySheet(); }); const nb=document.getElementById("bk-nudge-btn"); if(nb) nb.onclick=()=>backupSheet();
   if(imps.length){ renderMine(); const q=document.getElementById("lib-q"); q.oninput=()=>{ store.set("libQ",q.value); renderMine(); }; }
   const fi=document.getElementById("midi-file");
   fi.onchange=async()=>{ const files=[...(fi.files||[])]; if(!files.length)return;
@@ -1089,33 +1201,75 @@ function library(flash){
   };
   window.scrollTo(0,0);
 }
+const openSongs=new Set();
+function getFavs(){ return store.get("favs",[]); }
 function renderMine(){
   const box=document.getElementById("mine-list"); if(!box) return;
   const imps=getImports(); const best=store.get("best",{}); const q=normTxt(store.get("libQ","")).trim();
+  const favs=new Set(getFavs());
   let filter=store.get("catFilter","Tous");
   const groups={}; imps.forEach(it=>{ (groups[it.cat]=groups[it.cat]||[]).push(it); });
   const order=allCats().filter(c=>groups[c]).concat(Object.keys(groups).filter(c=>c!==UNSORTED&&!allCats().includes(c))).concat(groups[UNSORTED]?[UNSORTED]:[]);
-  if(filter!=="Tous"&&!groups[filter]) filter="Tous";
-  document.getElementById("cat-filter").innerHTML='<button data-filter="Tous" aria-pressed="'+(filter==="Tous")+'">Tout <i>'+imps.length+'</i></button>'+order.map(c=>'<button data-filter="'+esc(c)+'" aria-pressed="'+(filter===c)+'"'+(c===UNSORTED?' class="todo"':'')+'>'+esc(c)+' <i>'+groups[c].length+'</i></button>').join("");
-  document.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{ store.set("catFilter",b.dataset.filter); renderMine(); });
+  const favTitles=new Set(imps.filter(it=>favs.has(it.id)).map(it=>it.cat+"/"+songKey(it.title||it.name)));
+  if(filter==="★"&&!favTitles.size) filter="Tous";
+  if(filter!=="Tous"&&filter!=="★"&&!groups[filter]) filter="Tous";
+  document.getElementById("cat-filter").innerHTML='<button data-filter="Tous" aria-pressed="'+(filter==="Tous")+'">Tout <i>'+imps.length+'</i></button>'+
+    (favTitles.size?'<button data-filter="★" class="fav" aria-pressed="'+(filter==="★")+'">★ À travailler <i>'+favTitles.size+'</i></button>':'')+
+    order.map(c=>'<button data-filter="'+esc(c)+'" aria-pressed="'+(filter===c)+'"'+(c===UNSORTED?' class="todo"':'')+'>'+esc(c)+' <i>'+groups[c].length+'</i></button>').join("");
+  document.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{ store.set("catFilter",b.dataset.filter); renderMine(); window.scrollTo({top:Math.min(window.scrollY,(document.getElementById("mine")||document.body).offsetTop)}); });
+  const metaTxt=st=>st&&st.dur?fmtDur(st.dur)+' · '+String(st.nps).replace(".",",")+' notes/s':'';
   let h="", shown=0;
-  order.forEach(c=>{ if(filter!=="Tous"&&filter!==c) return;
-    const items=groups[c].filter(it=>!q||normTxt(it.title+" "+it.name+" "+(it.ver||"")).includes(q)); if(!items.length) return;
+  order.forEach(c=>{ if(filter!=="Tous"&&filter!=="★"&&filter!==c) return;
+    const items=groups[c].filter(it=>(!q||normTxt(it.title+" "+it.name+" "+(it.ver||"")).includes(q))&&(filter!=="★"||favTitles.has(c+"/"+songKey(it.title||it.name)))); if(!items.length) return;
     const songs={}; items.forEach(it=>{ const k=songKey(it.title||it.name); (songs[k]=songs[k]||{title:it.title||it.name,v:[]}).v.push(it); });
     const keys=Object.keys(songs).sort((a,b)=>songs[a].title.localeCompare(songs[b].title,"fr"));
     h+='<section class="cat-block"><h2 class="cat-h'+(c===UNSORTED?' todo':'')+'">'+esc(c)+'<small>'+keys.length+' titre'+(keys.length>1?'s':'')+'</small></h2>';
     if(c===UNSORTED) h+='<p class="hint-txt">L\'appli n\'a pas reconnu ces fichiers. Touche « Modifier » pour choisir leur catégorie.</p>';
     keys.forEach(k=>{ const sg=songs[k]; const vs=sg.v.sort((a,b)=>(itemLevel(a)||9)-(itemLevel(b)||9)||a.at-b.at); shown+=vs.length;
-      h+='<article class="song-card"><h3>'+esc(sg.title)+(vs.length>1?'<span class="vcount">'+vs.length+' versions</span>':'')+'</h3>';
-      vs.forEach((it,i)=>{ const lv=itemLevel(it); const st=it.stats||{};
-        const label=it.ver||(vs.length>1?"Version "+(i+1):"");
-        h+='<div class="ver-row"><a class="ver-link" href="#jouer-'+it.id+'"><span class="dpill d'+lv+'">'+(lv?DIFF[lv]:"?")+(it.diff&&it.diff!=="auto"?"":"")+'</span><span class="ver-txt">'+(label?'<b>'+esc(label)+'</b>':'')+'<span>'+(st.dur?fmtDur(st.dur)+' · '+String(st.nps).replace(".",",")+' notes/s':'')+(best[it.id]?' · joué ✓':'')+'</span></span><span class="go" aria-hidden="true">▶</span></a>'+
-           '<button class="mini" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title+(label?" "+label:""))+'">Modifier</button></div>'; });
-      h+='</article>'; });
+      const isFav=vs.some(it=>favs.has(it.id)); const ids=vs.map(it=>it.id).join(",");
+      const star='<button class="star" data-fav="'+ids+'" aria-pressed="'+isFav+'" aria-label="'+(isFav?'Retirer de « À travailler »':'Ajouter à « À travailler »')+'">'+(isFav?'★':'☆')+'</button>';
+      const played=vs.some(it=>best[it.id]);
+      if(vs.length===1){ const it=vs[0], lv=itemLevel(it);
+        h+='<div class="srow"><a class="srow-main" href="#jouer-'+it.id+'"><span class="dpill d'+lv+'">'+(lv?DIFF[lv]:"?")+'</span><span class="srow-t"><b>'+esc(sg.title)+'</b><span>'+(it.ver?esc(it.ver)+' · ':'')+metaTxt(it.stats)+(played?' · joué ✓':'')+'</span></span></a>'+star+
+           '<button class="mini" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title)+'">Modifier</button></div>';
+      } else {
+        const lvls=[...new Set(vs.map(itemLevel).filter(Boolean))].sort(); const lo=lvls[0]||0;
+        h+='<details class="sgroup" data-k="'+esc(c+"/"+k)+'"'+(q||openSongs.has(c+"/"+k)?' open':'')+'><summary class="srow"><span class="srow-main"><span class="dpill d'+lo+'">'+(lvls.length>1?'Dès '+DIFF[lo].toLowerCase():lo?DIFF[lo]:"?")+'</span><span class="srow-t"><b>'+esc(sg.title)+'</b><span>'+vs.length+' versions'+(played?' · joué ✓':'')+'</span></span><span class="chev" aria-hidden="true">▶</span></span>'+star+'</summary><div class="vers">';
+        vs.forEach((it,i)=>{ const lv=itemLevel(it); const label=it.ver||"Version "+(i+1);
+          h+='<div class="ver-row"><a class="ver-link" href="#jouer-'+it.id+'"><span class="dpill d'+lv+'">'+(lv?DIFF[lv]:"?")+'</span><span class="ver-txt"><b>'+esc(label)+'</b><span>'+metaTxt(it.stats)+(best[it.id]?' · joué ✓':'')+'</span></span><span class="go" aria-hidden="true">▶</span></a>'+
+             '<button class="mini" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title+" "+label)+'">Modifier</button></div>'; });
+        h+='</div></details>'; } });
     h+='</section>'; });
   if(!shown) h='<p class="empty">Aucun morceau ne correspond à « '+esc(store.get("libQ",""))+' ».</p>';
   box.innerHTML=h;
   box.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editSheet(b.dataset.edit));
+  box.querySelectorAll("details.sgroup").forEach(d=>d.addEventListener("toggle",()=>{ if(d.open) openSongs.add(d.dataset.k); else openSongs.delete(d.dataset.k); }));
+  box.querySelectorAll("[data-fav]").forEach(b=>b.onclick=e=>{ e.preventDefault(); e.stopPropagation();
+    const ids=b.dataset.fav.split(","); let f=getFavs(); const on=ids.some(x=>f.includes(x));
+    f=on?f.filter(x=>!ids.includes(x)):f.concat(ids.filter(x=>!f.includes(x))); store.set("favs",f); markDirty(); refreshNudge(); renderMine(); });
+}
+function tidySheet(){
+  const p=proposeTidy(getImports()); const u=store.get("undoTidy",null);
+  let h='<h2>Ranger les titres</h2>';
+  if(!p.renames.length&&!p.groups.length) h+='<p>Tout est déjà rangé : aucun titre à nettoyer, aucun fichier à regrouper.</p>';
+  else {
+    h+='<p class="hint-txt">Rien n\'est supprimé : les fichiers d\'un même morceau deviennent des <b>versions</b> d\'un seul titre. Décoche ce qui ne te convient pas, et corrige le titre si besoin.</p>';
+    if(p.groups.length){ h+='<p class="fld">Regrouper ('+p.groups.length+')</p>';
+      p.groups.forEach((g,i)=>{ h+='<div class="tidy-g"><label class="chk"><input type="checkbox" data-g="'+i+'" checked> '+esc(g.cat)+' · '+g.items.length+' fichiers</label>'+
+        '<input class="txt" data-gt="'+i+'" value="'+esc(g.title)+'" maxlength="80" aria-label="Titre du morceau" style="margin-top:6px"><ul>'+
+        g.items.map(x=>'<li>'+esc(x.from)+' → <b>'+esc(x.ver||"(sans nom de version)")+'</b></li>').join("")+'</ul></div>'; }); }
+    if(p.renames.length){ h+='<label class="tidy-all"><input type="checkbox" id="tidy-ren" checked> Nettoyer '+p.renames.length+' titre'+(p.renames.length>1?'s':'')+' (numéros, accents, mots inutiles)</label>'+
+      '<details><summary class="hint-txt">Voir les changements</summary><ul class="tidy-list">'+p.renames.map(r=>'<li>'+esc(r.from)+' → <b>'+esc(r.to)+'</b></li>').join("")+'</ul></details>'; }
+  }
+  h+='<div class="row">'+(p.renames.length||p.groups.length?'<button class="btn primary" id="tidy-go">Appliquer</button>':'')+'<button class="btn" data-close>Fermer</button>'+(u?'<button class="btn" id="tidy-undo">Annuler le dernier rangement</button>':'')+'</div>'+
+    '<p class="hint-txt">Tu peux toujours annuler le dernier rangement d\'ici. Ensuite, fais une sauvegarde.</p>';
+  openSheet("tidy",h);
+  const go=document.getElementById("tidy-go"); if(go) go.onclick=()=>{
+    const gi=[...document.querySelectorAll("[data-g]")].filter(x=>x.checked).map(x=>+x.dataset.g);
+    const titles={}; document.querySelectorAll("[data-gt]").forEach(x=>titles[+x.dataset.gt]=x.value);
+    const ren=document.getElementById("tidy-ren"); const n=applyTidy(p,ren?ren.checked:false,gi,titles);
+    closeSheet(); store.set("catFilter","Tous"); library({html:n?'<b>'+n+' fichier'+(n>1?'s':'')+' rangé'+(n>1?'s':'')+'.</b> '+(gi.length?gi.length+' morceau'+(gi.length>1?'x':'')+' regroupé'+(gi.length>1?'s':'')+' en versions. ':'')+'Pense à sauvegarder.':'Aucun changement.'}); };
+  const un=document.getElementById("tidy-undo"); if(un) un.onclick=()=>{ const n=undoTidy(); closeSheet(); library({html:'Rangement annulé : '+n+' fichier'+(n>1?'s':'')+' remis comme avant.'}); };
 }
 function editSheet(id){
   const list=enrich(getImports()); const it=list.find(x=>x.id===id); if(!it) return;
@@ -1152,7 +1306,7 @@ function editSheet(id){
 
 /* ---------- Sauvegarde ---------- */
 const PFX="atelier-piano:";
-const NO_BACKUP=["imports","midiAuto","catFilter","lastBackup","dirtyAt"];
+const NO_BACKUP=["imports","midiAuto","catFilter","lastBackup","dirtyAt","undoTidy"];
 function lsKeys(){ const k=[]; try{ for(let i=0;i<localStorage.length;i++){ const x=localStorage.key(i); if(x&&x.startsWith(PFX)) k.push(x.slice(PFX.length)); } }catch(e){} return k; }
 function markDirty(){ store.set("dirtyAt",Date.now()); }
 function needsBackup(){ return getImports().length>0&&store.get("dirtyAt",0)>store.get("lastBackup",0); }
@@ -1175,6 +1329,7 @@ function restoreBackup(text){
   const dt=p.data||{};
   Object.keys(dt).forEach(k=>{ const v=dt[k];
     if(k==="done"||k==="best"){ const cur=store.get(k,{}); Object.keys(v||{}).forEach(x=>{ if(v[x]) cur[x]=v[x]; }); store.set(k,cur); }
+    else if(k==="favs"){ const cur=store.get("favs",[]); (v||[]).forEach(c=>{ if(!cur.includes(c)) cur.push(c); }); store.set("favs",cur); }
     else if(k==="cats"){ const cur=store.get("cats",[]); (v||[]).forEach(c=>{ if(!cur.includes(c)) cur.push(c); }); store.set("cats",cur); }
     else if(k==="checks"){ const cur=store.get("checks",{}); Object.keys(v||{}).forEach(x=>{ if(!cur[x]) cur[x]=v[x]; }); store.set("checks",cur); }
     else if(store.get(k,null)===null) store.set(k,v); });
