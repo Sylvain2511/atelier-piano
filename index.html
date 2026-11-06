@@ -927,6 +927,50 @@ function parseMidi(buf){
   notes.sort((a,b)=>a.s-b.s||a.m-b.m);
   return {notes,bars,duration:Math.max(...notes.map(n=>n.e)),meta:texts.join(" "),tpq,smpte,tempos,sig};
 }
+/* ---------- Doigtés automatiques ---------- */
+// Écarts en demi-tons entre deux doigts de la main droite (d'après Parncutt et al., 1997) :
+// [min possible, min confortable, min détendu, max détendu, max confortable, max possible]
+const SPAN={"1-2":[-5,-3,1,5,8,10],"1-3":[-4,-2,3,7,10,12],"1-4":[-3,-1,5,9,12,14],"1-5":[-1,1,7,10,13,15],
+ "2-3":[1,1,1,2,3,5],"2-4":[1,1,3,4,5,7],"2-5":[2,2,5,6,8,10],"3-4":[1,1,1,2,2,4],"3-5":[1,1,3,4,5,7],"4-5":[1,1,1,2,3,5]};
+const isBlk=m=>[1,3,6,8,10].includes(((m%12)+12)%12);
+function spanCost(f1,f2,d){ // d : écart de f1 vers f2, vu comme une main droite
+  if(f1===f2) return d===0?0:6+Math.abs(d);
+  let a=f1,b=f2,x=d; if(a>b){ a=f2; b=f1; x=-d; }
+  const s=SPAN[a+"-"+b]; let c=0;
+  if(x<s[2]) c=x>=s[1]?(s[2]-x):x>=s[0]?(s[2]-s[1])+2*(s[1]-x):(s[2]-s[1])+2*(s[1]-s[0])+10+3*(s[0]-x);
+  else if(x>s[3]) c=x<=s[4]?(x-s[3]):x<=s[5]?(s[4]-s[3])+2*(x-s[4]):(s[4]-s[3])+2*(s[5]-s[4])+10+3*(x-s[5]);
+  if(a===1&&x<0) c+=1;                 // passage du pouce : possible mais moins confortable
+  if((a===3&&b===4)||(a===4&&b===5)) c+=.2;
+  return c; }
+function combos(k){ const out=[]; const rec=(st,acc)=>{ if(acc.length===k){ out.push(acc.slice()); return; } for(let f=st;f<=5;f++){ acc.push(f); rec(f+1,acc); acc.pop(); } }; rec(1,[]); return out; }
+const COMBOS=[null,combos(1),combos(2),combos(3),combos(4),combos(5)];
+function fingerHand(notes,hand){
+  // Regroupe les notes jouées ensemble (accords), puis cherche l'enchaînement de doigts le moins coûteux (Viterbi)
+  const ns=notes.slice().sort((a,b)=>a.s-b.s||a.m-b.m); const groups=[];
+  ns.forEach(n=>{ const g=groups[groups.length-1]; if(g&&n.s-g.s<.035) g.n.push(n); else groups.push({s:n.s,e:n.e,n:[n]}); });
+  groups.forEach(g=>{ g.n.sort((a,b)=>a.m-b.m); if(g.n.length>5) g.n=[g.n[0],...g.n.slice(-4)]; g.e=Math.max(...g.n.map(n=>n.e)); });
+  const mir=hand==="L"?-1:1; // la main gauche est le miroir de la droite
+  const states=groups.map(g=>{ const k=g.n.length; const ps=g.n.map(n=>n.m);
+    return COMBOS[k].map(c=>{ const f=hand==="L"?c.slice().reverse():c; // à gauche, le grave prend le 5
+      let cost=0; for(let i=0;i<k-1;i++) cost+=spanCost(f[i],f[i+1],(ps[i+1]-ps[i])*mir)*1.5;
+      f.forEach((x,i)=>{ if(x===1&&isBlk(ps[i])) cost+=k===1?1.5:.5; if(x===5&&isBlk(ps[i])&&k===1) cost+=.5; if(x===4&&k===1) cost+=.1; });
+      if(k>=3&&ps[k-1]-ps[0]>=7){ if(!f.includes(1)) cost+=.8; if(!f.includes(5)) cost+=.8; } // accord large : pouce et auriculaire aux extrémités
+      return {f,cost}; }); });
+  if(!groups.length) return;
+  let prev=states[0].map(st=>({c:st.cost,b:-1})); const back=[prev];
+  for(let gi=1;gi<groups.length;gi++){ const A=groups[gi-1], B=groups[gi]; const gap=B.s-A.e;
+    const w=gap>1.2?.15:gap>.4?.5:1;   // après un silence, la main a le temps de se replacer
+    const cur=states[gi].map(st=>{ let best=1e9,bi=0;
+      states[gi-1].forEach((ps,pi)=>{ const lo=spanCost(ps.f[0],st.f[0],(B.n[0].m-A.n[0].m)*mir);
+        const hi=spanCost(ps.f[ps.f.length-1],st.f[st.f.length-1],(B.n[B.n.length-1].m-A.n[A.n.length-1].m)*mir);
+        const c=prev[pi].c+w*(A.n.length===1&&B.n.length===1?lo:(lo+hi)/2); if(c<best){ best=c; bi=pi; } });
+      return {c:best+st.cost,b:bi}; });
+    back.push(cur); prev=cur; }
+  let bi=0; prev.forEach((x,i)=>{ if(x.c<prev[bi].c) bi=i; });
+  for(let gi=groups.length-1;gi>=0;gi--){ const st=states[gi][bi]; groups[gi].n.forEach((n,i)=>n.f=st.f[i]); bi=back[gi][bi].b; }
+}
+function fingerSong(song){ song.notes.forEach(n=>delete n.f);
+  ["R","L"].forEach(h=>{ const ns=song.notes.filter(n=>n.h===h); if(ns.length&&ns.length<20000) fingerHand(ns,h); }); }
 function assignHands(song,method){
   const units={}; song.notes.forEach(n=>{ const k=n.trk+"/"+n.ch; (units[k]=units[k]||{sum:0,c:0}); units[k].sum+=n.m; units[k].c++; });
   const keys=Object.keys(units);
@@ -1388,6 +1432,7 @@ function player(id){
   const mm=id.match(/^(.*)-n(\d)$/); const def=LIB.find(d=>d.id===(mm?mm[1]:id)); const li=mm?(+mm[2]-1):0;
   try{ song=def?buildSong(def,li):loadImport(id); }catch(e){ err=e.message; }
   if(!song){ view.innerHTML=tabsHTML("morceaux")+'<p class="feedback bad">'+esc(err||"Ce morceau n'existe plus sur cet appareil.")+'</p><a class="btn" href="#morceaux">← Morceaux</a>'; document.body.classList.remove("playing"); return; }
+  try{ fingerSong(song); }catch(e){}
   const prefs=store.get("player",{mode:"attente",hands:"deux",speed:.8});
   P={song,alive:true,t:-2,prevT:-2,playing:false,mode:prefs.mode,hands:prefs.hands,speed:prefs.speed,loop:{on:false,a:1,b:Math.min(4,song.bars.length)},
      groups:[],gi:0,ai:0,right:0,wrong:0,started:0,lit:new Map(),flash:[],held:new Set(),raf:0,last:0,finished:false};
@@ -1400,6 +1445,7 @@ function player(id){
    '<button class="btn icon" id="pl-fs" aria-label="Plein écran" title="Plein écran" hidden>⛶</button><details class="settings" id="pl-set"><summary>Réglages</summary><div class="set-grid">'+
    '<label for="pl-speed">Vitesse <b id="pl-speed-v"></b></label><input type="range" id="pl-speed" min="30" max="120" step="5">'+
    '<label class="chk" for="pl-loop"><input type="checkbox" id="pl-loop"> Répéter les mesures</label><span class="loop-in"><input type="number" id="pl-la" min="1" max="'+nb+'" inputmode="numeric"> à <input type="number" id="pl-lb" min="1" max="'+nb+'" inputmode="numeric"></span>'+
+   '<label class="chk" for="pl-fing"><input type="checkbox" id="pl-fing"> Afficher les doigtés conseillés (1 = pouce … 5 = auriculaire)</label><span class="hint-txt">Calculés automatiquement : à vérifier sur les passages difficiles.</span>'+
    '<label class="chk" for="pl-casio"><input type="checkbox" id="pl-casio"> Faire jouer l\'accompagnement par le Casio</label><span class="hint-txt" id="pl-casio-t"></span>'+
    (song.builtin&&def.levels.length>1?'<span class="lbl-niv">Niveau</span><div class="seg lv-seg" role="group" aria-label="Niveau">'+def.levels.map((lv,i)=>'<button data-lv="'+(i+1)+'" aria-pressed="'+(i===song.level)+'" title="'+esc(lv.n)+'">'+(i+1)+'</button>').join('')+'</div>':'')+
    (song.builtin?'':'<label for="pl-split">Mains</label><select id="pl-split"><option value="pistes">Selon les pistes du fichier</option><option value="split">Séparer au Do central</option></select>')+
@@ -1496,12 +1542,17 @@ function player(id){
     song.bars.forEach((b,i)=>{ const y=fallH-(b-t)*pps; if(y<0||y>fallH)return; g.fillStyle=col.line; g.fillRect(0,y,W,1); g.fillStyle=col.muted; g.fillText(String(i+1),4,y-2); });
     // notes
     const now=performance.now(); P.lit.clear();
-    const gr=P.mode==="attente"?P.groups[P.gi]:null;
+    const gr=P.mode==="attente"?P.groups[P.gi]:null; const showF=store.get("fingers",true);
     for(let i=0;i<song.notes.length;i++){ const n=song.notes[i]; if(n.s>t+span)break; if(n.e<t-.05)continue;
       const k=keyRect(n.m); const y1=fallH-(n.s-t)*pps, y0=fallH-(n.e-t)*pps; const top=Math.max(0,y0), bot=Math.min(fallH,y1); if(bot<=top)continue;
       const need=needHand(n.h); const c=n.h==="R"?col.felt:col.lh;
       g.globalAlpha=(P.mode==="attente"&&!need)?.32:1; g.fillStyle=c; rr(k.x+1.5,top,k.w-3,Math.max(3,bot-top-1),Math.min(5,k.w/3)); g.fill();
       if(k.w>=15&&bot-top>16){ g.globalAlpha=(P.mode==="attente"&&!need)?.6:1; g.fillStyle="#fff"; g.font="600 "+Math.max(9,Math.min(15,k.w*.45))+"px "+cssVar("--f-body"); g.textAlign="center"; g.textBaseline="bottom"; g.fillText(FR[pc(n.m)].replace("♯","#"),k.x+k.w/2,bot-3); g.textAlign="left"; }
+      if(showF&&n.f&&k.w>=11&&bot>8){ const r=Math.max(6,Math.min(10,k.w*.4)); const cx=k.x+k.w/2;
+        const lab=(k.w>=15&&bot-top>16)?Math.max(9,Math.min(15,k.w*.45))+6:2;
+        const cy=bot-top-lab>=2*r+4?bot-lab-r-1:top-r-2; // dans la note au-dessus du nom, ou juste au-dessus si la note est courte
+        if(cy>-r){ g.globalAlpha=(P.mode==="attente"&&!need)?.5:1; g.fillStyle="#fff"; g.beginPath(); g.arc(cx,cy,r,0,Math.PI*2); g.fill();
+          g.fillStyle=c; g.font="700 "+Math.round(r*1.3)+"px "+cssVar("--f-body"); g.textAlign="center"; g.textBaseline="middle"; g.fillText(String(n.f),cx,cy+.5); g.textAlign="left"; g.textBaseline="bottom"; g.globalAlpha=1; } }
       g.globalAlpha=1;
       if(n.s<=t+.001&&n.e>t&&(!need||P.mode!=="attente")) P.lit.set(n.m,c);
     }
@@ -1535,8 +1586,9 @@ function player(id){
   document.getElementById("pl-loop").onchange=e=>{ P.loop.on=e.target.checked; if(P.loop.on){ setPlaying(false); buildGroups(); seek(Math.max(-2,song.bars[P.loop.a-1]-1.2)); msg("Boucle mesures "+P.loop.a+" à "+P.loop.b+". Touche « Lancer »."); } syncUI(); };
   document.getElementById("pl-la").onchange=e=>{ P.loop.a=clampBar(e.target.value); if(P.loop.b<P.loop.a)P.loop.b=P.loop.a; syncUI(); if(P.loop.on){ setPlaying(false); buildGroups(); seek(Math.max(-2,song.bars[P.loop.a-1]-1.2)); } };
   document.getElementById("pl-lb").onchange=e=>{ P.loop.b=clampBar(e.target.value); if(P.loop.b<P.loop.a)P.loop.a=P.loop.b; syncUI(); };
+  const fg=document.getElementById("pl-fing"); fg.checked=store.get("fingers",true); fg.onchange=()=>{ store.set("fingers",fg.checked); draw(); };
   document.getElementById("pl-casio").onchange=e=>{ S.casioSound=e.target.checked; save(); allOff(); };
-  const sp=document.getElementById("pl-split"); if(sp) sp.onchange=()=>{ store.set("hands-"+id,sp.value); assignHands(song,sp.value); const t=P.t; buildGroups(); seek(t); syncUI(); draw(); };
+  const sp=document.getElementById("pl-split"); if(sp) sp.onchange=()=>{ store.set("hands-"+id,sp.value); assignHands(song,sp.value); try{ fingerSong(song); }catch(e){} const t=P.t; buildGroups(); seek(t); syncUI(); draw(); };
   const jump=dir=>{ setPlaying(false); const cur=barIndex(P.t); const target=Math.max(1,Math.min(nb,cur+dir)); buildGroups(); seek(Math.max(-2,song.bars[target-1]-.8)); msg("Mesure "+target+"."); draw(); };
   document.getElementById("pl-prev").onclick=()=>jump(-1); document.getElementById("pl-next").onclick=()=>jump(1);
   P.syncUI=syncUI;
