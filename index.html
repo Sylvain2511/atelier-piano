@@ -258,6 +258,12 @@ body.playing main{padding-block:12px 12px}
 .srow-t b{font-size:16px;font-weight:600;overflow-wrap:anywhere}
 .srow-t span{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .srow .dpill{min-width:0}
+.ddot{flex:none;width:12px;height:12px;border-radius:50%;background:var(--line);margin-left:2px}
+.ddot.d1{background:var(--ok)} .ddot.d2{background:var(--felt)} .ddot.d3{background:var(--bad)}
+.dword.d1{color:var(--ok)} .dword.d2{color:var(--felt)} .dword.d3{color:var(--bad)}
+.more{flex:none;width:40px;height:40px;border:0;background:none;color:var(--muted);font-size:22px;line-height:1;cursor:pointer;border-radius:50%}
+.more:active{background:var(--line)}
+.legend .ddot{display:inline-block;margin:0 4px 0 10px;vertical-align:-1px}
 .star{flex:none;width:40px;height:40px;border:0;background:none;font-size:22px;line-height:1;color:var(--line);cursor:pointer}
 .star[aria-pressed="true"]{color:var(--felt)}
 .sgroup{border-bottom:1px solid var(--line)}
@@ -1162,7 +1168,7 @@ function library(flash){
   h+='<div class="feedback" id="imp-msg" aria-live="polite"></div>';
   if(!imps.length) h+='<div class="empty-card"><p><b>Aucun morceau importé.</b></p><ol><li>Télécharge des fichiers .mid (MuseScore, Mutopia…).</li><li>Touche « + Importer » et sélectionne-les tous d\'un coup : appui long sur le premier, puis touche les autres.</li><li>Ils sont rangés automatiquement par catégorie et par titre.</li></ol></div>';
   else h+='<div class="lib-tools"><input type="search" class="txt search" id="lib-q" placeholder="Rechercher un titre…" aria-label="Rechercher un morceau" value="'+esc(store.get("libQ",""))+'"><div class="cat-filter" id="cat-filter" role="group" aria-label="Filtrer par catégorie"></div></div><div id="mine-list"></div>'+
-    '<p class="legend"><span class="dpill d1">Facile</span><span class="dpill d2">Intermédiaire</span><span class="dpill d3">Difficile</span> estimé d\'après le nombre de notes par seconde. Tu peux le corriger avec « Modifier ».</p>';
+    '<p class="legend"><span class="ddot d1"></span>Facile<span class="ddot d2"></span>Intermédiaire<span class="ddot d3"></span>Difficile : estimé d\'après le nombre de notes par seconde. Tu peux le corriger avec ⋯.</p>';
   h+='</section>';
   h+='<details class="chapter builtin"'+(imps.length?'':' open')+'><summary><span><b>Morceaux inclus</b><small>5 pièces du domaine public, avec 2 ou 3 niveaux chacune</small></span></summary>';
   LIB.forEach(d=>{ h+='<div class="song-row"><span class="song-txt"><span class="t">'+d.title+'</span><span class="s">'+d.composer+'</span><span class="d">'+d.desc+'</span><span class="lv-list" style="--n:'+d.levels.length+'">'+
@@ -1218,6 +1224,7 @@ function renderMine(){
     (favTitles.size?'<button data-filter="★" class="fav" aria-pressed="'+(filter==="★")+'">★ À travailler <i>'+favTitles.size+'</i></button>':'')+
     order.map(c=>'<button data-filter="'+esc(c)+'" aria-pressed="'+(filter===c)+'"'+(c===UNSORTED?' class="todo"':'')+'>'+esc(c)+' <i>'+groups[c].length+'</i></button>').join("");
   document.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{ store.set("catFilter",b.dataset.filter); renderMine(); window.scrollTo({top:Math.min(window.scrollY,(document.getElementById("mine")||document.body).offsetTop)}); });
+  const dword=lv=>lv?'<span class="dword d'+lv+'">'+DIFF[lv]+'</span> · ':'';
   const metaTxt=st=>st&&st.dur?fmtDur(st.dur)+' · '+String(st.nps).replace(".",",")+' notes/s':'';
   let h="", shown=0;
   order.forEach(c=>{ if(filter!=="Tous"&&filter!=="★"&&filter!==c) return;
@@ -1231,14 +1238,14 @@ function renderMine(){
       const star='<button class="star" data-fav="'+ids+'" aria-pressed="'+isFav+'" aria-label="'+(isFav?'Retirer de « À travailler »':'Ajouter à « À travailler »')+'">'+(isFav?'★':'☆')+'</button>';
       const played=vs.some(it=>best[it.id]);
       if(vs.length===1){ const it=vs[0], lv=itemLevel(it);
-        h+='<div class="srow"><a class="srow-main" href="#jouer-'+it.id+'"><span class="dpill d'+lv+'">'+(lv?DIFF[lv]:"?")+'</span><span class="srow-t"><b>'+esc(sg.title)+'</b><span>'+(it.ver?esc(it.ver)+' · ':'')+metaTxt(it.stats)+(played?' · joué ✓':'')+'</span></span></a>'+star+
-           '<button class="mini" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title)+'">Modifier</button></div>';
+        h+='<div class="srow"><a class="srow-main" href="#jouer-'+it.id+'"><span class="ddot d'+lv+'" aria-hidden="true"></span><span class="srow-t"><b>'+esc(sg.title)+'</b><span>'+dword(lv)+(it.ver?esc(it.ver)+' · ':'')+metaTxt(it.stats)+(played?' · joué ✓':'')+'</span></span></a>'+star+
+           '<button class="more" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title)+'">⋯</button></div>';
       } else {
         const lvls=[...new Set(vs.map(itemLevel).filter(Boolean))].sort(); const lo=lvls[0]||0;
-        h+='<details class="sgroup" data-k="'+esc(c+"/"+k)+'"'+(q||openSongs.has(c+"/"+k)?' open':'')+'><summary class="srow"><span class="srow-main"><span class="dpill d'+lo+'">'+(lvls.length>1?'Dès '+DIFF[lo].toLowerCase():lo?DIFF[lo]:"?")+'</span><span class="srow-t"><b>'+esc(sg.title)+'</b><span>'+vs.length+' versions'+(played?' · joué ✓':'')+'</span></span><span class="chev" aria-hidden="true">▶</span></span>'+star+'</summary><div class="vers">';
+        h+='<details class="sgroup" data-k="'+esc(c+"/"+k)+'"'+(q||openSongs.has(c+"/"+k)?' open':'')+'><summary class="srow"><span class="srow-main"><span class="ddot d'+lo+'" aria-hidden="true"></span><span class="srow-t"><b>'+esc(sg.title)+'</b><span>'+vs.length+' versions'+(lo?' · <span class="dword d'+lo+'">'+(lvls.length>1?'dès '+DIFF[lo].toLowerCase():DIFF[lo])+'</span>':'')+(played?' · joué ✓':'')+'</span></span><span class="chev" aria-hidden="true">▶</span></span>'+star+'</summary><div class="vers">';
         vs.forEach((it,i)=>{ const lv=itemLevel(it); const label=it.ver||"Version "+(i+1);
-          h+='<div class="ver-row"><a class="ver-link" href="#jouer-'+it.id+'"><span class="dpill d'+lv+'">'+(lv?DIFF[lv]:"?")+'</span><span class="ver-txt"><b>'+esc(label)+'</b><span>'+metaTxt(it.stats)+(best[it.id]?' · joué ✓':'')+'</span></span><span class="go" aria-hidden="true">▶</span></a>'+
-             '<button class="mini" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title+" "+label)+'">Modifier</button></div>'; });
+          h+='<div class="ver-row"><a class="ver-link" href="#jouer-'+it.id+'"><span class="ddot d'+lv+'" aria-hidden="true"></span><span class="ver-txt"><b>'+esc(label)+'</b><span>'+dword(lv)+metaTxt(it.stats)+(best[it.id]?' · joué ✓':'')+'</span></span><span class="go" aria-hidden="true">▶</span></a>'+
+             '<button class="more" data-edit="'+it.id+'" aria-label="Modifier '+esc(sg.title+" "+label)+'">⋯</button></div>'; });
         h+='</div></details>'; } });
     h+='</section>'; });
   if(!shown) h='<p class="empty">Aucun morceau ne correspond à « '+esc(store.get("libQ",""))+' ».</p>';
