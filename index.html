@@ -1075,6 +1075,7 @@ function fmtDur(s){ const m=Math.floor(s/60); return m?m+" min "+String(s%60).pa
 function enrich(list){ let changed=false;
   list.forEach(it=>{ if(!it.cat){ it.cat=guessCat(it.name,it.meta); }
     if(!it.title){ const sp=splitTitle(it.name,it.cat); it.title=sp.title; if(it.ver===undefined) it.ver=sp.ver; if(!it.diff) it.diff=sp.hint; changed=true; }
+    if(it.title&&(/\d{6,}|[\u3040-\u30ff\u3400-\u9fff]/.test(it.title)||it.title.includes("_"))){ const c=cleanTitle(it.title); if(c!==it.title){ it.title=c; changed=true; } } // numéros MuseScore retirés d'office
     if(!it.stats){ try{ it.stats=midiStats(parseMidi(b64d(it.b64))); changed=true; }catch(e){ it.stats={n:0,dur:0,nps:0,poly:0,lvl:0}; } } });
   if(changed){ try{ localStorage.setItem("atelier-piano:imports",JSON.stringify(list)); }catch(e){} }
   return list; }
