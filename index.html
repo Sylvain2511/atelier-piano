@@ -884,14 +884,14 @@ function parseMidi(buf){
   sigs.sort((a,b)=>a.tick-b.tick); const sig=sigs[0]||{num:4,den:4}; const tpb=smpte?0:tpq*4*sig.num/sig.den;
   let maxTick=0; notes0.forEach(n=>{ if(n.e>maxTick)maxTick=n.e; });
   const firstTick=Math.min(...notes0.map(n=>n.s));
-  const notes=notes0.map(n=>({m:n.m,s:t2s(n.s),e:t2s(n.e),trk:n.trk,ch:n.ch}));
+  const notes=notes0.map(n=>({m:n.m,s:t2s(n.s),e:t2s(n.e),trk:n.trk,ch:n.ch,ts:n.s,te:n.e}));
   let bars=[];
   if(tpb>0){ const b0=Math.floor(firstTick/tpb)*tpb; for(let tk=b0;tk<maxTick;tk+=tpb) bars.push(t2s(tk)); }
   else { const s0=Math.min(...notes.map(n=>n.s)), e0=Math.max(...notes.map(n=>n.e)); for(let s=s0;s<e0;s+=2) bars.push(s); }
   const off=bars.length?bars[0]:0;
   notes.forEach(n=>{n.s-=off;n.e-=off}); bars=bars.map(b=>b-off);
   notes.sort((a,b)=>a.s-b.s||a.m-b.m);
-  return {notes,bars,duration:Math.max(...notes.map(n=>n.e)),meta:texts.join(" ")};
+  return {notes,bars,duration:Math.max(...notes.map(n=>n.e)),meta:texts.join(" "),tpq,smpte,tempos,sig};
 }
 function assignHands(song,method){
   const units={}; song.notes.forEach(n=>{ const k=n.trk+"/"+n.ch; (units[k]=units[k]||{sum:0,c:0}); units[k].sum+=n.m; units[k].c++; });
@@ -972,6 +972,71 @@ function enrich(list){ let changed=false;
 function loadImport(id){ const it=getImports().find(x=>x.id===id); if(!it) return null;
   const s=parseMidi(b64d(it.b64)); s.id=id; s.title=it.title||it.name; const lv=itemLevel(it);
   s.sub=(it.cat||guessCat(it.name,it.meta))+(it.ver?" · "+it.ver:"")+(lv&&normTxt(it.ver||"")!==normTxt(DIFF[lv])?" · "+DIFF[lv]:""); assignHands(s,store.get("hands-"+id,"pistes")); return s; }
+
+/* ---------- Versions plus faciles (générées depuis un fichier importé) ---------- */
+// Travaille en ticks pour garder le rythme et les mesures du fichier d'origine.
+function simplifySong(src,level){
+  const tpq=src.tpq, sig=src.sig||{num:4,den:4};
+  const beat=(sig.den===8&&sig.num%3===0)?tpq*1.5:tpq*4/sig.den;   // 6/8 : temps = noire pointée
+  const bar=tpq*4*sig.num/sig.den;
+  const strong=(sig.num%2===0&&sig.num>=4&&sig.den===4)||(sig.den===8&&sig.num===12)?bar/2:bar; // temps forts : 1 et 3 en 4/4
+  const R=src.notes.filter(n=>n.h==="R"), L=src.notes.filter(n=>n.h==="L");
+  // Mélodie : la note la plus haute de chaque attaque ; les notes d'ornement très proches sont fusionnées
+  const win=level===1?tpq/4:tpq/8;
+  const rs=R.slice().sort((a,b)=>a.ts-b.ts||b.m-a.m); const mel=[];
+  for(let i=0;i<rs.length;){ const t0=rs[i].ts; let top=rs[i]; let j=i;
+    while(j<rs.length&&rs[j].ts-t0<win){ if(rs[j].m>top.m) top=rs[j]; j++; }
+    mel.push({m:top.m,s:t0,e:Math.max(top.te,t0+1)}); i=j; }
+  for(let i=0;i<mel.length-1;i++) mel[i].e=Math.max(mel[i].s+1,Math.min(mel[i].e,mel[i+1].s));
+  // Main gauche : l'harmonie est lue sur chaque demi-mesure (temps forts).
+  // Facile : une basse tenue. Intermédiaire : la même basse avec deux notes d'accord (accord plaqué tenu).
+  const lh=[];
+  if(L.length){ const end=Math.max(...L.map(n=>n.te)); const g0=Math.floor(Math.min(...L.map(n=>n.ts))/strong)*strong;
+    for(let t=g0;t<end;t+=strong){ const t1=t+strong;
+      const pool=L.filter(n=>n.ts>=t-tpq/16&&n.ts<t1-tpq/16);
+      if(!pool.length) continue;
+      const low=Math.min(...pool.map(n=>n.m)); let bass=low; while(bass>=60) bass-=12;
+      const chord=[bass];
+      if(level===2){ const pcs=[]; pool.map(n=>n.m).sort((a,b)=>a-b).forEach(m=>{ const pc=((m-bass)%12+12)%12; if(pc&&!pcs.includes(pc)) pcs.push(pc); });
+        pcs.sort((a,b)=>a-b).slice(0,2).forEach(pc=>{ let m=bass+pc; if(m>=60) m-=12; if(m>bass) chord.push(m); }); }
+      const at=Math.max(t,Math.min(...pool.map(n=>n.ts)));
+      chord.forEach(m=>lh.push({m,s:at,e:t1})); } }
+  lh.sort((a,b)=>a.s-b.s||a.m-b.m);
+  return {mel,lh};
+}
+function writeMidi(src,mel,lh){
+  const bytes=[]; const u32=v=>[(v>>>24)&255,(v>>>16)&255,(v>>>8)&255,v&255];
+  const vlq=v=>{ v=Math.max(0,Math.round(v)); const o=[v&127]; v=Math.floor(v/128); while(v>0){ o.unshift((v&127)|128); v=Math.floor(v/128); } return o; };
+  const track=evs=>{ evs.sort((a,b)=>a.t-b.t||a.o-b.o); const d=[]; let last=0;
+    evs.forEach(e=>{ d.push(...vlq(e.t-last),...e.b); last=e.t; }); d.push(0,0xFF,0x2F,0);
+    return [0x4D,0x54,0x72,0x6B,...u32(d.length),...d]; };
+  const meta=src.tempos.map(tp=>({t:tp.tick,o:0,b:[0xFF,0x51,3,(tp.us>>16)&255,(tp.us>>8)&255,tp.us&255]}));
+  const sg=src.sig||{num:4,den:4}; meta.push({t:0,o:0,b:[0xFF,0x58,4,sg.num,Math.round(Math.log2(sg.den)),24,8]});
+  const notesTrk=(list,ch,vel)=>{ const ev=[]; list.forEach(n=>{ ev.push({t:n.s,o:1,b:[0x90|ch,n.m,vel]}); ev.push({t:n.e,o:0,b:[0x80|ch,n.m,0]}); }); return ev; };
+  bytes.push(0x4D,0x54,0x68,0x64,...u32(6),0,1,0,3,(src.tpq>>8)&255,src.tpq&255);
+  bytes.push(...track(meta),...track(notesTrk(mel,0,88)),...track(notesTrk(lh,1,70)));
+  return new Uint8Array(bytes).buffer;
+}
+const AUTO_LV=[null,{ver:"Facile (auto)",diff:"1"},{ver:"Intermédiaire (auto)",diff:"2"}];
+function makeEasier(id){
+  const list=getImports(); const it=list.find(x=>x.id===id); if(!it) throw new Error("Morceau introuvable.");
+  const src=parseMidi(b64d(it.b64)); if(src.smpte) throw new Error("Ce fichier utilise un format de temps rare (SMPTE) : impossible de le simplifier.");
+  assignHands(src,store.get("hands-"+id,"pistes"));
+  if(!src.notes.some(n=>n.h==="R")) throw new Error("Aucune note de main droite trouvée : rien à simplifier.");
+  const made=[];
+  for(const level of [1,2]){
+    const {mel,lh}=simplifySong(src,level); const buf=writeMidi(src,mel,lh);
+    const s=parseMidi(buf); const L=AUTO_LV[level];
+    const old=list.findIndex(x=>x.src===id&&x.auto===level);
+    const nit={id:old>=0?list[old].id:"import-"+Date.now()+"-"+Math.floor(Math.random()*1e4)+"-"+level,
+      name:it.name+" ("+L.ver+")",title:it.title,ver:L.ver,cat:it.cat,diff:L.diff,stats:midiStats(s),
+      at:Date.now(),size:buf.byteLength,meta:"",b64:b64e(buf),src:id,auto:level};
+    if(old>=0) list[old]=nit; else list.push(nit);
+    made.push({it:nit,n:mel.length+lh.length,orig:src.notes.length});
+  }
+  if(!saveImports(list)) throw new Error("Le stockage du navigateur est plein : supprime des morceaux pour faire de la place.");
+  return made;
+}
 
 /* ---------- Bibliothèque ---------- */
 function tabsHTML(cur){ return '<nav class="tabs" aria-label="Sections"><a href="#accueil" class="tab'+(cur==="lecons"?" on":"")+'">Leçons</a><a href="#morceaux" class="tab'+(cur==="morceaux"?" on":"")+'">Morceaux</a></nav>'; }
@@ -1065,7 +1130,14 @@ function editSheet(id){
       [["auto","Auto"+(st.lvl?" ("+DIFF[st.lvl]+")":"")],["1","Facile"],["2","Intermédiaire"],["3","Difficile"]].map(([v,l])=>'<button role="radio" data-diff="'+v+'" aria-checked="'+(String(it.diff||"auto")===v)+'">'+l+'</button>').join("")+'</div>'+
     '<p class="fld">Catégorie</p><div class="cat-pick" role="radiogroup" aria-label="Catégorie">'+cats.concat([UNSORTED]).map(c=>'<button role="radio" data-cat="'+esc(c)+'" aria-checked="'+(c===cur)+'">'+esc(c)+'</button>').join("")+'</div>'+
     '<label class="fld" for="ed-new">Ou une nouvelle catégorie</label><input class="txt" id="ed-new" placeholder="Ex. : One Piece, Films, Jazz…" maxlength="30">'+
+    (it.src?'<p class="hint-txt">Version créée automatiquement depuis un autre fichier.</p>':
+     '<p class="fld">Versions plus faciles</p><p class="hint-txt">Crée deux versions rangées avec ce titre : <b>Facile</b> (la mélodie à droite, une basse sur les temps forts à gauche) et <b>Intermédiaire</b> (la même mélodie, avec un accord de trois notes sur les temps forts). Le fichier d\'origine n\'est pas modifié. Si les versions existent déjà, elles sont recréées.</p>'+
+     '<div class="row"><button class="btn" id="ed-easy">Créer une version plus facile</button></div><p class="feedback" id="ed-easy-msg"></p>')+
     '<div class="row"><button class="btn primary" id="ed-save">Enregistrer</button><button class="btn" data-close>Annuler</button><button class="btn danger" id="ed-del">Supprimer</button></div>');
+  const ez=document.getElementById("ed-easy"); if(ez) ez.onclick=()=>{ const m=document.getElementById("ed-easy-msg");
+    try{ const r=makeEasier(id); closeSheet();
+      library({html:'Versions créées pour « '+esc(it.title)+' » : '+r.map(x=>'<b>'+esc(x.it.ver)+'</b> ('+x.n+' notes sur '+x.orig+')').join(", ")+'. Écoute-les en mode Écoute avant de les travailler : la simplification est automatique.'});
+    }catch(e){ m.className="feedback bad"; m.textContent=e.message; } };
   let pick=cur, diff=String(it.diff||"auto");
   document.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{ pick=b.dataset.cat; document.querySelectorAll("[data-cat]").forEach(x=>x.setAttribute("aria-checked",x===b)); document.getElementById("ed-new").value=""; });
   document.querySelectorAll("[data-diff]").forEach(b=>b.onclick=()=>{ diff=b.dataset.diff; document.querySelectorAll("[data-diff]").forEach(x=>x.setAttribute("aria-checked",x===b)); });
