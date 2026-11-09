@@ -1476,7 +1476,12 @@ function player(id){
 
   const needHand=h=>P.mode==="attente"&&(P.hands==="deux"||(P.hands==="droite"&&h==="R")||(P.hands==="gauche"&&h==="L"));
   function buildGroups(){ const req=song.notes.filter(n=>needHand(n.h)); const gs=[];
-    req.forEach(n=>{ const last=gs[gs.length-1]; if(last&&n.s-last.s<.04) last.need.add(n.m); else gs.push({s:n.s,need:new Set([n.m]),got:new Set()}); });
+    // Un accord égrené (notes décalées de quelques centièmes de seconde qui se chevauchent) forme un seul groupe :
+    // on peut alors jouer ses notes ensemble ou une par une, dans n'importe quel ordre.
+    req.forEach(n=>{ const last=gs[gs.length-1];
+      const roll=last&&!last.need.has(n.m)&&n.s-last.s<.25&&n.s-last.ls<.12&&last.notes.some(p=>p.h===n.h&&p.e>n.s+.1);
+      if(last&&(n.s-last.s<.04||roll)){ last.need.add(n.m); last.notes.push(n); last.ls=n.s; }
+      else gs.push({s:n.s,ls:n.s,need:new Set([n.m]),got:new Set(),notes:[n]}); });
     P.groups=gs; }
   function seek(t){ P.t=t; P.prevT=t; P.waitTxt=""; allOff(); P.lit.clear();
     P.gi=P.groups.findIndex(gr=>gr.s>=t-.001); if(P.gi<0)P.gi=P.groups.length; for(let i=P.gi;i<P.groups.length;i++) P.groups[i].got.clear();
@@ -1502,8 +1507,10 @@ function player(id){
   P.press=m=>{ if(!P||!P.alive)return; P.held.add(m); setTimeout(()=>P&&P.held.delete(m),220);
     if(P.mode!=="attente"||!P.playing){ P.flash.push({m,c:"ok",t:performance.now()}); return; }
     const gr=P.groups[P.gi];
-    if(gr&&gr.s-P.t<.7&&gr.need.has(m)&&!gr.got.has(m)){ gr.got.add(m); P.right++; P.flash.push({m,c:"ok",t:performance.now()});
-      if(gr.got.size===gr.need.size){ P.gi++; } }
+    // Note jouée un peu en avance : elle compte pour l'accord qui suit de près (moins de 0,3 s), sans bloquer ensuite
+    let ahead=null; if(gr&&!(gr.need.has(m)&&!gr.got.has(m))) for(let j=P.gi+1;j<P.groups.length&&P.groups[j].s-gr.s<.3;j++){ const g2=P.groups[j]; if(g2.need.has(m)&&!g2.got.has(m)){ ahead=g2; break; } }
+    if(gr&&gr.s-P.t<.7&&((gr.need.has(m)&&!gr.got.has(m))||ahead)){ (ahead||gr).got.add(m); P.right++; P.flash.push({m,c:"ok",t:performance.now()});
+      while(P.groups[P.gi]&&P.groups[P.gi].got.size===P.groups[P.gi].need.size) P.gi++; }
     else if(gr&&gr.s-P.t<.7&&!gr.need.has(m)){ P.wrong++; P.flash.push({m,c:"bad",t:performance.now()}); msg("Ça, c'est "+nameOf(m)+oct(m)+". Attendu : "+[...gr.need].filter(x=>!gr.got.has(x)).map(x=>nameOf(x)+oct(x)).join(" + "),"bad"); }
   };
   input.listener=m=>P&&P.press(m); input.pedalListener=null;
