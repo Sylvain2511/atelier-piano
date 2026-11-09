@@ -274,6 +274,7 @@ body.playing main{padding-block:12px 12px}
 .sgroup[open] .chev{transform:rotate(90deg)}
 .sgroup .vers{padding:0 0 8px 14px;border-left:2px solid var(--felt-soft);margin-left:4px}
 .sgroup .ver-row:first-child{border-top:0}
+.fix-row select{width:auto;min-width:96px;font-size:16px}
 .tidy-g{border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0}
 .tidy-g label.chk{display:flex;gap:8px;align-items:center;font-weight:600}
 .tidy-g input[type=checkbox],.tidy-all input[type=checkbox]{width:18px;height:18px;accent-color:var(--felt);flex:none}
@@ -1138,8 +1139,12 @@ function enrich(list){ let changed=false;
     if(!it.stats){ try{ it.stats=midiStats(parseMidi(b64d(it.b64))); changed=true; }catch(e){ it.stats={n:0,dur:0,nps:0,poly:0,lvl:0}; } } });
   if(changed){ try{ localStorage.setItem("atelier-piano:imports",JSON.stringify(list)); }catch(e){} }
   return list; }
+// Corrections de notes faites par l'utilisateur : [{ts, trk, m (hauteur dans le fichier), to (nouvelle hauteur) ou null (note supprimée)}]
+function applyEdits(song,edits){ if(!edits||!edits.length) return song;
+  edits.forEach(e=>{ const n=song.notes.find(x=>x.ts===e.ts&&x.trk===e.trk&&x.m===e.m&&!x._ed); if(!n) return; n._ed=1; if(e.to==null) n._del=1; else n.m=e.to; });
+  song.notes=song.notes.filter(n=>!n._del); song.notes.forEach(n=>delete n._ed); song.notes.sort((a,b)=>a.s-b.s||a.m-b.m); song.edited=edits.length; return song; }
 function loadImport(id){ const it=getImports().find(x=>x.id===id); if(!it) return null;
-  const s=parseMidi(b64d(it.b64)); s.id=id; s.title=it.title||it.name; const lv=itemLevel(it);
+  const s=applyEdits(parseMidi(b64d(it.b64)),it.edits); s.id=id; s.title=it.title||it.name; const lv=itemLevel(it);
   s.sub=(it.cat||guessCat(it.name,it.meta))+(it.ver?" · "+it.ver:"")+(lv&&normTxt(it.ver||"")!==normTxt(DIFF[lv])?" · "+DIFF[lv]:""); assignHands(s,store.get("hands-"+id,"pistes")); return s; }
 
 /* ---------- Versions plus faciles (générées depuis un fichier importé) ---------- */
@@ -1189,7 +1194,7 @@ function writeMidi(src,mel,lh){
 const AUTO_LV=[null,{ver:"Facile (auto)",diff:"1"},{ver:"Intermédiaire (auto)",diff:"2"}];
 function makeEasier(id){
   const list=getImports(); const it=list.find(x=>x.id===id); if(!it) throw new Error("Morceau introuvable.");
-  const src=parseMidi(b64d(it.b64)); if(src.smpte) throw new Error("Ce fichier utilise un format de temps rare (SMPTE) : impossible de le simplifier.");
+  const src=applyEdits(parseMidi(b64d(it.b64)),it.edits); if(src.smpte) throw new Error("Ce fichier utilise un format de temps rare (SMPTE) : impossible de le simplifier.");
   assignHands(src,store.get("hands-"+id,"pistes"));
   if(!src.notes.some(n=>n.h==="R")) throw new Error("Aucune note de main droite trouvée : rien à simplifier.");
   const made=[];
@@ -1345,10 +1350,13 @@ function editSheet(id){
       [["auto","Auto"+(st.lvl?" ("+DIFF[st.lvl]+")":"")],["1","Facile"],["2","Intermédiaire"],["3","Difficile"]].map(([v,l])=>'<button role="radio" data-diff="'+v+'" aria-checked="'+(String(it.diff||"auto")===v)+'">'+l+'</button>').join("")+'</div>'+
     '<p class="fld">Catégorie</p><div class="cat-pick" role="radiogroup" aria-label="Catégorie">'+cats.concat([UNSORTED]).map(c=>'<button role="radio" data-cat="'+esc(c)+'" aria-checked="'+(c===cur)+'">'+esc(c)+'</button>').join("")+'</div>'+
     '<label class="fld" for="ed-new">Ou une nouvelle catégorie</label><input class="txt" id="ed-new" placeholder="Ex. : One Piece, Films, Jazz…" maxlength="30">'+
+    (it.edits&&it.edits.length?'<p class="fld">Notes corrigées</p><p class="hint-txt">'+it.edits.length+' note'+(it.edits.length>1?'s':'')+' corrigée'+(it.edits.length>1?'s':'')+' à la main dans ce morceau.</p><div class="row"><button class="btn" id="ed-unfix">Annuler mes corrections</button></div>':'')+
     (it.src?'<p class="hint-txt">Version créée automatiquement depuis un autre fichier.</p>':
      '<p class="fld">Versions plus faciles</p><p class="hint-txt">Crée deux versions rangées avec ce titre : <b>Facile</b> (la mélodie à droite, une basse sur les temps forts à gauche) et <b>Intermédiaire</b> (la même mélodie, avec un accord de trois notes sur les temps forts). Le fichier d\'origine n\'est pas modifié. Si les versions existent déjà, elles sont recréées.</p>'+
      '<div class="row"><button class="btn" id="ed-easy">Créer une version plus facile</button></div><p class="feedback" id="ed-easy-msg"></p>')+
     '<div class="row"><button class="btn primary" id="ed-save">Enregistrer</button><button class="btn" data-close>Annuler</button><button class="btn danger" id="ed-del">Supprimer</button></div>');
+  const uf=document.getElementById("ed-unfix"); if(uf) uf.onclick=()=>{ if(uf.dataset.c!=="1"){ uf.dataset.c="1"; uf.textContent="Confirmer : remettre les notes du fichier"; return; }
+    const l2=getImports(); const x=l2.find(y=>y.id===id); if(x){ delete x.edits; saveImports(l2); } closeSheet(); library({html:'Corrections annulées pour « '+esc(it.title)+' ».'}); };
   const ez=document.getElementById("ed-easy"); if(ez) ez.onclick=()=>{ const m=document.getElementById("ed-easy-msg");
     try{ const r=makeEasier(id); closeSheet();
       library({html:'Versions créées pour « '+esc(it.title)+' » : '+r.map(x=>'<b>'+esc(x.it.ver)+'</b> ('+x.n+' notes sur '+x.orig+')').join(", ")+'. Écoute-les en mode Écoute avant de les travailler : la simplification est automatique.'});
@@ -1507,9 +1515,12 @@ function buildScore(song,VF,staffOf){
   const L={measures,ties,xs,keyName,tsStr,t2s,starts};
   // hauteur : selon l'étendue des notes (5 unités par demi-interligne)
   const stp=m=>Math.floor(m/12)*7+[0,0,1,1,2,3,3,4,4,5,5,6][((m%12)+12)%12];
-  let hiT=45, loT=37, hiB=33, loB=25; notes.forEach(n=>{ const s1=stp(n.m); if(staffOf(n)==="T"){ hiT=Math.max(hiT,s1); loT=Math.min(loT,s1); } else { hiB=Math.max(hiB,s1); loB=Math.min(loB,s1); } });
-  L.yT=Math.min(110,Math.max(28,(hiT-45)*5+28)); const gap=Math.min(110,Math.max(45,Math.max((37-loT)*5,(hiB-33)*5)+40));
-  L.yB=L.yT+40+gap; L.H=L.yB+40+Math.min(110,Math.max(26,(25-loB)*5+26));
+  // marges réglées sur l'essentiel des notes (98 %) : quelques notes extrêmes peuvent toucher le bord, mais la portée reste grande
+  const pct=(arr,q,def)=>{ if(!arr.length) return def; const a=arr.slice().sort((x,y)=>x-y); return a[Math.min(a.length-1,Math.max(0,Math.round(q*(a.length-1))))]; };
+  const sT=notes.filter(n=>staffOf(n)==="T").map(n=>stp(n.m)), sB=notes.filter(n=>staffOf(n)==="B").map(n=>stp(n.m));
+  const hiT=Math.max(45,pct(sT,.98,45)), loT=Math.min(37,pct(sT,.02,37)), hiB=Math.max(33,pct(sB,.98,33)), loB=Math.min(25,pct(sB,.02,25));
+  L.yT=Math.min(80,Math.max(22,(hiT-45)*5+24)); const gap=Math.min(80,Math.max(38,Math.max((37-loT)*5,(hiB-33)*5)+30));
+  L.yB=L.yT+40+gap; L.H=L.yB+40+Math.min(80,Math.max(20,(25-loB)*5+22));
   let x=0; const opt={space_above_staff_ln:0,space_below_staff_ln:0};
   measures.forEach((M,i)=>{ const fmt=new VF.Formatter(); fmt.joinVoices([M.voices.T]); fmt.joinVoices([M.voices.B]);
     let minW=60; try{ minW=fmt.preCalculateMinTotalWidth([M.voices.T,M.voices.B]); }catch(e){}
@@ -1549,7 +1560,7 @@ function buildScore(song,VF,staffOf){
 }
 
 /* ---------- Lecteur ---------- */
-let P=null;
+let P=null; let pendingSeek=null;
 function stopPlayer(){ if(!P)return; P.alive=false; cancelAnimationFrame(P.raf); allOff(); releaseWake(); window.removeEventListener("resize",P.onResize); if(P.onFs)document.removeEventListener("fullscreenchange",P.onFs); try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(e){} P=null; }
 let wake=null;
 async function holdWake(){ try{ if(navigator.wakeLock&&!wake){ wake=await navigator.wakeLock.request("screen"); wake.addEventListener("release",()=>{wake=null}); } }catch(e){} }
@@ -1582,7 +1593,7 @@ function player(id){
    '<button class="btn icon" id="pl-fs" aria-label="Plein écran" title="Plein écran" hidden>⛶</button><details class="settings" id="pl-set"><summary>Réglages</summary><div class="set-grid">'+
    '<label for="pl-speed">Vitesse <b id="pl-speed-v"></b></label><input type="range" id="pl-speed" min="30" max="120" step="5">'+
    '<label class="chk" for="pl-loop"><input type="checkbox" id="pl-loop"> Répéter les mesures</label><span class="loop-in"><input type="number" id="pl-la" min="1" max="'+nb+'" inputmode="numeric"> à <input type="number" id="pl-lb" min="1" max="'+nb+'" inputmode="numeric"></span>'+
-   '<label class="chk" for="pl-staff"><input type="checkbox" id="pl-staff"> Afficher la partition</label><span class="hint-txt">Écrite automatiquement à partir du fichier MIDI : fiable sur les rythmes simples, à vérifier sur les passages complexes (triolets, plusieurs voix dans une main).</span>'+
+   '<label class="chk" for="pl-staff"><input type="checkbox" id="pl-staff"> Afficher la partition</label><span class="lbl-niv">Taille de la partition</span><div class="seg" role="group" aria-label="Taille de la partition"><button data-ssz="1">Petite</button><button data-ssz="2">Moyenne</button><button data-ssz="3">Grande</button></div><span class="hint-txt">Écrite automatiquement à partir du fichier MIDI : fiable sur les rythmes simples, à vérifier sur les passages complexes (triolets, plusieurs voix dans une main).</span>'+
    '<label class="chk" for="pl-fing"><input type="checkbox" id="pl-fing"> Afficher les doigtés conseillés (1 = pouce … 5 = auriculaire)</label><span class="hint-txt">Calculés automatiquement : à vérifier sur les passages difficiles.</span>'+
    '<label class="chk" for="pl-casio"><input type="checkbox" id="pl-casio"> Faire jouer l\'accompagnement par le Casio</label><span class="hint-txt" id="pl-casio-t"></span>'+
    (song.builtin&&def.levels.length>1?'<span class="lbl-niv">Niveau</span><div class="seg lv-seg" role="group" aria-label="Niveau">'+def.levels.map((lv,i)=>'<button data-lv="'+(i+1)+'" aria-pressed="'+(i===song.level)+'" title="'+esc(lv.n)+'">'+(i+1)+'</button>').join('')+'</div>':'')+
@@ -1700,8 +1711,9 @@ function player(id){
     H=Math.max(land?(store.get("staff",true)?250:170):(store.get("staff",true)?360:240),Math.min(avail,900)); W=stage.clientWidth; dpr=window.devicePixelRatio||1;
     cv.style.height=H+"px"; cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
     const sh=store.get("staff",true);
-    if(sh){ stH=land?Math.round(Math.max(92,Math.min(160,H*.36))):Math.round(Math.max(120,Math.min(200,H*.26)));
-      kbH=land?Math.max(56,Math.min(110,H*.25)):Math.max(76,Math.min(130,H*.22)); }
+    if(sh){ const sz=store.get("staffSize",2); const fr=land?[.38,.5,.6][sz-1]:[.28,.36,.44][sz-1];
+      stH=Math.round(Math.max(land?100:130,Math.min(land?330:420,H*fr)));
+      kbH=land?Math.max(50,Math.min(96,H*.2)):Math.max(70,Math.min(120,H*.18)); }
     else { stH=0; kbH=land?Math.max(66,Math.min(130,H*.36)):Math.max(84,Math.min(150,H*.27)); }
     fallH=H-kbH-stH; span=land?(sh?1.6:2.2):2.6;
     const ideal=Math.max(20,Math.min(56,kbH/3.6)); setRange(Math.max(15,countW(lo0,hi0),Math.ceil(W/ideal))); ww=W/whites.length;
@@ -1760,7 +1772,58 @@ function player(id){
   cv.addEventListener("pointermove",e=>{ if(!drag||e.pointerId!==drag.id) return; const dx=e.clientX-drag.x; if(Math.abs(dx)<2) return;
     let nt; if(score){ const sc=stH/score.H; nt=score.tAt(score.xAt(drag.t)-dx/sc); } else nt=drag.t-dx/lastPxs;
     nt=Math.max(-2,Math.min(song.duration,nt)); seek(nt); P.lit.clear(); });
-  const endDrag=e=>{ if(!drag||e.pointerId!==drag.id) return; const was=drag.was; drag=null; seek(P.t); if(was) setPlaying(true); else syncUI(); };
+  const endDrag=e=>{ if(!drag||e.pointerId!==drag.id) return; const d0=drag; drag=null;
+    if(e.type==="pointerup"&&Math.abs(e.clientX-d0.x)<6){ const r=cv.getBoundingClientRect(); seek(d0.t); syncUI(); noteFix(e.clientX-r.left,e.clientY-r.top); return; }
+    seek(P.t); if(d0.was) setPlaying(true); else syncUI(); };
+  // Corriger une note : on touche la partition, on choisit la note de l'accord et sa nouvelle hauteur
+  function noteFix(sx,sy){
+    if(song.builtin){ msg("Les morceaux inclus ne se corrigent pas : ils ont été vérifiés.",""); return; }
+    // instant touché
+    let tt; if(score){ const sc=stH/score.H; const hw=score.headTotal*sc, xp=hw+Math.max(28,W*.08); if(sx<hw) return; tt=score.tAt(score.xAt(P.t)+(sx-xp)/sc); }
+    else { const xPlay=Math.round(Math.max(3.2,Math.min(9,stH/20))*5.2)+Math.max(24,W*.12); tt=P.t+(sx-xPlay)/lastPxs; }
+    const staff=score?(sy/(stH/score.H)<(score.yT+40+score.yB)/2?"T":"B"):(sy<stH*.5?"T":"B");
+    // attaque la plus proche sur cette portée
+    let best=null; song.notes.forEach(n=>{ if(staffOf(n)!==staff) return; const d=Math.abs(n.s-tt); if(!best||d<best.d-1e-4) best={d,s:n.s}; });
+    if(!best||best.d>1.2){ msg("Touche une note sur la partition pour la corriger."); return; }
+    const chord=song.notes.filter(n=>staffOf(n)===staff&&Math.abs(n.s-best.s)<.03).sort((a,b)=>b.m-a.m);
+    const bi=barIndex(best.s+1e-4); const tk=chord[0].ts; const bt=song.barTicks?song.barTicks[bi-1]:null; const sg=song.barSigs?song.barSigs[bi-1]:song.sig;
+    const bpos=bt!=null&&sg?(tk-bt)/(song.tpq*4/sg.den):null; const bInt=bpos!=null?Math.floor(bpos+1e-6):0, frac=bpos!=null?bpos-bInt:0;
+    const beatTxt=bpos==null?'':' · '+(bInt+1)+(bInt===0?'er':'e')+' temps'+(Math.abs(frac-.5)<.05?' et demi':frac>.05?' (après le début du temps)':'');
+    const flatKey=score?(/^(F|Bb|Eb|Ab|Db|Gb)$/.test(score.keyName)||(score.keyName==="C"&&useFlats)):useFlats; const NAMES=flatKey?["Do","Ré♭","Ré","Mi♭","Mi","Fa","Sol♭","Sol","La♭","La","Si♭","Si"]:FR; const nm=m=>NAMES[pc(m)]+oct(m);
+    let sel=0; const target=chord.map(n=>n.m); const del=chord.map(()=>false);
+    const render=()=>{ const cur=target[sel];
+      return '<h2>Corriger une note</h2><p class="hint-txt">Mesure '+bi+beatTxt+' · '+(staff==="T"?'clé de sol':'clé de fa')+'</p>'+
+      '<p class="fld">Note de l\'accord</p><div class="cat-pick" role="radiogroup" aria-label="Note à corriger">'+chord.map((n,i)=>'<button role="radio" data-nsel="'+i+'" aria-checked="'+(i===sel)+'">'+(del[i]?'<s>'+nm(n.m)+'</s>':nm(n.m)+(target[i]!==n.m?' → '+nm(target[i]):''))+'</button>').join("")+'</div>'+
+      '<p class="fld">Nouvelle note</p><div class="row fix-row"><select class="txt" id="fx-n" aria-label="Note">'+NAMES.map((f,i)=>'<option value="'+i+'"'+(i===pc(cur)?' selected':'')+'>'+f+'</option>').join("")+'</select>'+
+      '<select class="txt" id="fx-o" aria-label="Octave">'+[1,2,3,4,5,6,7].map(o=>'<option value="'+o+'"'+(o===oct(cur)?' selected':'')+'>'+o+'</option>').join("")+'</select></div>'+
+      '<div class="row"><button class="btn" id="fx-down">− ½ ton</button><button class="btn" id="fx-up">+ ½ ton</button><button class="btn" id="fx-del">'+(del[sel]?'Garder cette note':'Supprimer cette note')+'</button></div>'+
+      '<div class="row"><button class="btn" id="fx-play">Écouter l\'accord</button></div>'+
+      '<p class="hint-txt">La correction est enregistrée dans ce morceau et dans ta sauvegarde. Tu peux tout annuler avec ⋯ dans la liste des morceaux.</p>'+
+      '<div class="row"><button class="btn primary" id="fx-save">Enregistrer</button><button class="btn" data-close>Annuler</button></div>'; };
+    const bind=()=>{ document.querySelectorAll("[data-nsel]").forEach(b=>b.onclick=()=>{ sel=+b.dataset.nsel; redraw(); tone(target[sel],0,1.2); });
+      const setM=m=>{ target[sel]=Math.max(21,Math.min(108,m)); del[sel]=false; redraw(); tone(target[sel],0,1.2); };
+      document.getElementById("fx-n").onchange=e=>setM((oct(target[sel])+1)*12+(+e.target.value));
+      document.getElementById("fx-o").onchange=e=>setM((+e.target.value+1)*12+pc(target[sel]));
+      document.getElementById("fx-down").onclick=()=>setM(target[sel]-1); document.getElementById("fx-up").onclick=()=>setM(target[sel]+1);
+      document.getElementById("fx-del").onclick=()=>{ del[sel]=!del[sel]; redraw(); };
+      document.getElementById("fx-play").onclick=()=>{ target.forEach((m,i)=>{ if(!del[i]) tone(m,0,1.4); }); };
+      document.getElementById("fx-save").onclick=save; };
+    const redraw=()=>{ const sh=document.querySelector(".sheet"); if(sh){ sh.innerHTML=render(); bind(); } };
+    const save=()=>{ const list=getImports(); const it=list.find(x=>x.id===song.id); if(!it){ closeSheet(); return; }
+      const edits=(it.edits||[]).slice(); let n=0;
+      chord.forEach((nt,i)=>{ const to=del[i]?null:target[i]; if(to===nt.m) return; n++;
+        // si cette note avait déjà été corrigée, on remplace la correction au lieu d'en empiler une deuxième
+        const prev=edits.find(e=>e.ts===nt.ts&&e.trk===nt.trk&&e.to===nt.m);
+        if(prev){ if(to===prev.m) edits.splice(edits.indexOf(prev),1); else prev.to=to; }
+        else edits.push({ts:nt.ts,trk:nt.trk,m:nt.m,to}); });
+      closeSheet(); if(!n){ msg("Aucun changement."); return; }
+      it.edits=edits; if(!saveImports(list)){ msg("Le stockage du navigateur est plein : correction non enregistrée.","bad"); return; }
+      pendingSeek=Math.max(-2,best.s-1.2); player(song.id); setTimeout(()=>{ if(P&&P.alive){ const m=document.getElementById("pl-msg"); if(m){ m.textContent="Correction enregistrée (mesure "+bi+"). Pense à sauvegarder."; m.className="ok"; } } },50); };
+    // note la plus proche du doigt présélectionnée
+    if(score){ const vy=sy/(stH/score.H); const stp=m=>Math.floor(m/12)*7+[0,0,1,1,2,3,3,4,4,5,5,6][pc(m)];
+      const yOf=m=>staff==="T"?score.yT+40-(stp(m)-37)*5:score.yB+40-(stp(m)-25)*5; let bd=1e9; chord.forEach((n,i)=>{ const d=Math.abs(yOf(n.m)-vy); if(d<bd){ bd=d; sel=i; } }); }
+    openSheet("fix",render()); bind(); tone(target[sel],0,1.2);
+  }
   cv.addEventListener("pointerup",endDrag); cv.addEventListener("pointercancel",endDrag);
 
   // Boucle d'animation
@@ -1842,6 +1905,8 @@ function player(id){
   document.getElementById("pl-la").onchange=e=>{ P.loop.a=clampBar(e.target.value); if(P.loop.b<P.loop.a)P.loop.b=P.loop.a; syncUI(); if(P.loop.on){ setPlaying(false); buildGroups(); seek(Math.max(-2,song.bars[P.loop.a-1]-1.2)); } };
   document.getElementById("pl-lb").onchange=e=>{ P.loop.b=clampBar(e.target.value); if(P.loop.b<P.loop.a)P.loop.a=P.loop.b; syncUI(); };
   const sf=document.getElementById("pl-staff"); sf.checked=store.get("staff",true); sf.onchange=()=>{ store.set("staff",sf.checked); rebuildScore(); resize(); };
+  const syncSz=()=>view.querySelectorAll("[data-ssz]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.ssz===store.get("staffSize",2)));
+  view.querySelectorAll("[data-ssz]").forEach(b=>b.onclick=()=>{ store.set("staffSize",+b.dataset.ssz); syncSz(); resize(); }); syncSz();
   rebuildScore();
   const fg=document.getElementById("pl-fing"); fg.checked=store.get("fingers",true); fg.onchange=()=>{ store.set("fingers",fg.checked); draw(); };
   document.getElementById("pl-casio").onchange=e=>{ S.casioSound=e.target.checked; save(); allOff(); };
@@ -1857,7 +1922,7 @@ function player(id){
   P.onFs=()=>{ fsb.textContent=document.fullscreenElement?"⤢":"⛶"; fsb.setAttribute("aria-label",document.fullscreenElement?"Quitter le plein écran":"Plein écran"); setTimeout(resize,120); };
   document.addEventListener("fullscreenchange",P.onFs);
   document.getElementById("pl-set").addEventListener("toggle",()=>setTimeout(resize,30));
-  buildGroups(); seek(-2); syncUI();
+  buildGroups(); seek(pendingSeek!=null?pendingSeek:-2); pendingSeek=null; syncUI();
   requestAnimationFrame(()=>{ resize(); P.last=performance.now(); P.raf=requestAnimationFrame(frame); });
   window.scrollTo(0,0);
 }
